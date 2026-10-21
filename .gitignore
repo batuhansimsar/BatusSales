@@ -1,0 +1,25 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+TestResults/
+coverage/
+
+# Node / Next
+**/node_modules/
+**/.next/
+**/out/
+**/.turbo/
+*.tsbuildinfo
+npm-debug.log*
+
+# Local and sensitive
+.env
+.env.*
+!.env.example
+!.env.local.example
+**/appsettings.Development.json
+.vscode/
+.idea/
+.DS_Store
