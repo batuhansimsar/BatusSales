@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using BatusSales.Api.Data;
+using BatusSales.Api.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -168,6 +169,93 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+
+    [Fact]
+    public async Task ExistingTokenFollowsLiveMembershipRoleForContactDeletion()
+    {
+        using var owner = CreateClient();
+        using var member = CreateClient();
+        await AuthenticateAsync(owner);
+        var memberEmail = await AuthenticateAsync(member);
+
+        var organizationId = await CreateOrganizationAsync(owner, "Live-role test organization");
+        var firstContact = await CreateContactAsync(owner, organizationId);
+        var secondContact = await CreateContactAsync(owner, organizationId);
+        var contactsPath = $"/api/organizations/{organizationId}/contacts";
+        Guid memberUserId;
+
+        // A test-only DB mutation simulates a real organization invitation/role change.
+        // It does not create a public membership-management endpoint.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            memberUserId = await db.Users
+                .Where(u => u.Email == memberEmail)
+                .Select(u => u.Id)
+                .SingleAsync();
+            db.Memberships.Add(new OrganizationMembership
+            {
+                OrganizationId = organizationId,
+                UserId = memberUserId,
+                Role = OrganizationRole.Agent
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // An Agent can read contacts but cannot delete them.
+        Assert.Equal(HttpStatusCode.OK,
+            (await member.GetAsync($"{contactsPath}/{firstContact}")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await member.DeleteAsync($"{contactsPath}/{firstContact}")).StatusCode);
+
+        // Promote the same member without changing their issued access token.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(m =>
+                m.OrganizationId == organizationId && m.UserId == memberUserId);
+            membership.Role = OrganizationRole.Admin;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await member.DeleteAsync($"{contactsPath}/{firstContact}")).StatusCode);
+
+        // Demotion must take effect on the next request with that *same* token.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(m =>
+                m.OrganizationId == organizationId && m.UserId == memberUserId);
+            membership.Role = OrganizationRole.Agent;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await member.DeleteAsync($"{contactsPath}/{secondContact}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await owner.GetAsync($"{contactsPath}/{secondContact}")).StatusCode);
+
+        // Rejected deletes must not soft-delete data or emit a deletion audit event.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var remaining = await db.Contacts.IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(c => c.Id == secondContact && c.OrganizationId == organizationId);
+            Assert.False(remaining.IsDeleted);
+            Assert.Equal(1, await db.AuditEvents.CountAsync(a =>
+                a.OrganizationId == organizationId && a.Action == "contact.deleted"));
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.DeleteAsync($"{contactsPath}/{secondContact}")).StatusCode);
+
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(2, await verifyDb.AuditEvents.CountAsync(a =>
+            a.OrganizationId == organizationId && a.Action == "contact.deleted"));
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -175,7 +263,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             AllowAutoRedirect = false
         });
 
-    private static async Task AuthenticateAsync(HttpClient client)
+    private static async Task<string> AuthenticateAsync(HttpClient client)
     {
         var email = $"tenant-{Guid.NewGuid():N}@example.test";
         const string password = "Strong-Integration-Password_2026!";
@@ -193,6 +281,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var json = await login.Content.ReadFromJsonAsync<JsonElement>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", json.GetProperty("accessToken").GetString());
+        return email;
     }
 
     private static async Task<Guid> CreateOrganizationAsync(HttpClient client, string name)
