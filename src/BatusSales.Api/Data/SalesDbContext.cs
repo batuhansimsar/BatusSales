@@ -54,7 +54,7 @@ public sealed class SalesDbContext(
 
             // Fail closed when the request has not passed tenant membership authorization.
             b.HasQueryFilter(x =>
-                ActiveTenantId.HasValue && x.OrganizationId == ActiveTenantId.Value);
+                x.OrganizationId == ActiveTenantId);
         });
     }
 
