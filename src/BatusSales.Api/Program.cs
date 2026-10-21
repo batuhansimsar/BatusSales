@@ -75,8 +75,10 @@ app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "ok" }));
+// Readiness is different from liveness: a reachable DB with missing application
+// tables must not receive business requests.
 app.MapGet("/health/ready", async (AppDbContext db, CancellationToken ct) =>
-    await db.Database.CanConnectAsync(ct)
+    await DatabaseReadiness.IsReadyAsync(db, ct)
         ? Results.Ok(new { status = "ready" })
         : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
