@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+.next/
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/
+.idea/
+coverage/
+TestResults/
