@@ -1,3 +1,81 @@
+## CURRENT MAIN (verified snapshot) — 2026-10-21
+
+> **Read this section before the historical log below.** Earlier text saying
+> `main` is README-only or that PR #12 is only a candidate is now **obsolete**.
+> Snapshot verified against `main@22e0c9f70b7bae3ebec553587bc6ac7c688897c0`. Every future development session
+> must re-read the live branch, PRs, and CI; never assume this SHA remains current.
+
+### Integrated into main (P0 partial backend, NOT sellable MVP)
+
+- Canonical ASP.NET Core 10 / EF Core 10 + PostgreSQL API foundation is
+  **PR #12, merged**. Contains development-mode ASP.NET Identity,
+  organization onboarding, membership-checked CRM contacts
+  (create/list/detail/update/soft-delete), audit records, rate limits,
+  health endpoints and Docker development configuration.
+- Role-aware delete and EF tenant read/write isolation from **PRs #15 and #16**
+  were incorporated into the selected foundation. Do not reapply
+  the overlapping #19 guard patch. The implementation includes
+  context-scoped tenant filtering, guarded tracked writes, an organization
+  concurrency token, and role checks for sensitive contact deletion.
+- Membership-revocation regression **PR #21 was merged**; real PostgreSQL
+  HTTP tests assert that a previously valid access token cannot retain
+  organization or CRM access after its membership is revoked.
+- CI jobs include .NET unit tests, authenticated HTTP PostgreSQL integration
+  tests, and a separate NuGet dependency audit. A green check validates
+  only its corresponding SHA/job, **not** production deployment.
+
+### Distinct unmerged work / duplicate prevention
+
+- **PR #1** contains isolated Booking domain rules, IANA/DST handling,
+  PostgreSQL `tstzrange`/GiST exclusion constraints and SQL/parallel
+  double-booking regression. Keep it separate until canonical organization,
+  staff, migration and authorization contracts are integrated.
+- Alternative backend scaffolds **#2/#4/#5/#6/#7/#8/#11** are *not additive*;
+  do not merge them wholesale or bootstrap another Identity/CRM implementation.
+  Only selectively port individually reviewed non-overlapping functionality.
+- Stacked changes **#17/#20/#22** target the competing #8 lineage; review
+  against main before any port, and skip features/tests already present.
+- The selected baseline layout is `src/BatusSales.Api` and `tests/`.
+  Do not introduce a second competing backend directory structure.
+
+### P0 gates still missing — in execution order
+
+1. Versioned, reviewed EF Core migrations replacing dev-only
+   `EnsureCreated`; safe migration/rollback procedure, connection secrets,
+   HTTPS proxy configuration, and tested PostgreSQL backup/restore.
+2. Production-safe registration and account recovery: real delivery,
+   confirmed-email policy, browser authentication and CSRF strategy;
+   tenant authorization/privilege negatives, unsafe bulk SQL and
+   PostgreSQL RLS/composite-FK defense review.
+3. Reuse a compatible Next.js frontend foundation, then connect business
+   onboarding -> **web chat widget -> shared inbox -> human takeover**.
+4. Grounded FAQ/knowledge agent with least-privilege actions, handoff and
+   cost guards; CRM deal pipeline; integrate booking with actual staff-hours,
+   tenant permissions, idempotency and migrations.
+5. Workflow events, dashboard/usage limits, subscription/payment pilot flow,
+   observability, privacy/consent/deletion controls and full E2E testing.
+
+**Technology guidance (verified 2026-10-21):** .NET 10 / EF Core 10 match
+the chosen backend; EF query filters reduce accidental tenant leakage but
+do not authorize arbitrary SQL, and are not a substitute for verified
+membership and database review. Next.js 16 is supported; pin and audit
+resolved dependencies, including React Server Components security fixes,
+before shipping a frontend. Avoid Redis/RabbitMQ/pgvector before a tested P0
+feature requires them.
+
+References:
+- https://github.com/batuhansimsar/BatusSales/pull/12
+- https://github.com/batuhansimsar/BatusSales/pull/21
+- https://github.com/batuhansimsar/BatusSales/issues/14
+- https://learn.microsoft.com/en-us/ef/core/querying/filters
+- https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0
+- https://nextjs.org/support-policy
+- https://nextjs.org/blog/CVE-2025-66478
+
+---
+
+## Historical workstream notes (superseded when inconsistent with current main)
+
 # BatusSales — authoritative project state
 
 Last reconciled: 2026-10-21 (Europe/Istanbul)
@@ -53,3 +131,12 @@ Milestone: **P0 development foundation, NOT a paid-pilot-ready MVP**.
 3. If an existing PR or branch already handles it, improve or review that workstream; do not recreate its code, migration, test or commit under a different name.
 4. Research official patch/security guidance relevant to the next smallest P0 slice; keep new infrastructure limited to demonstrated need.
 5. Test against disposable PostgreSQL and CI; record exact new SHA and pass/fail, and do not claim production readiness without the release gates above.
+
+
+## Increment — audit event tenant query defense (2026-10-21, PR #24)
+
+- Applied the existing membership-verified DbContext tenant query scope to `AuditEvent` reads, failing closed with no authorized tenant.
+- Added no-membership / guessed-ID / tenant-switch / denied-membership audit isolation regression coverage.
+- Kept all 3 PostgreSQL HTTP test audit assertions meaningful with explicit privileged `IgnoreQueryFilters()`; the test must inspect persisted writes even without an active tenant scope.
+- Reused original commit `287d61e4a4a323e1e8726a71e35508380e9c30ab` via ancestry-preserving merge (no duplicate Identity/CRM code).
+- Remaining security gates: production identity and migrations, explicit privileged query policy, direct SQL/RLS review and immutable audit write protections.
