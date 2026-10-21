@@ -1,0 +1,10 @@
+.git
+.github
+.env
+.env.*
+**/bin
+**/obj
+**/node_modules
+**/.next
+tests
+docs

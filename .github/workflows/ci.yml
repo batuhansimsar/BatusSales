@@ -1,0 +1,21 @@
+name: API quality gates
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore tests and API
+        run: dotnet restore tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj
+      - name: Build with warnings as errors
+        run: dotnet build tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj -c Release --no-restore
+      - name: Run unit tests
+        run: dotnet test tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj -c Release --no-build
