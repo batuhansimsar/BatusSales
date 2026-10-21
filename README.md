@@ -4,13 +4,13 @@ BatuSales is an AI Business Operating System for small businesses.
 
 **Project status: initial technical foundation only. Not production ready.**
 
-## Implemented in the initial foundation branch
+## Implemented on main (development baseline)
 
 - .NET 10 / ASP.NET Core API with PostgreSQL (EF Core / Npgsql)
 - ASP.NET Core Identity register, login and refresh endpoints
 - Organization onboarding API and database-backed membership
 - Tenant-scoped contacts: create, list, view, update and soft-delete
-- Audit events, validation, health endpoints and basic rate limiting
+- Audit events, Owner/Admin-only tenant-scoped audit-history API, validation, health endpoints and basic rate limiting
 - Unit tests and GitHub Actions build/test workflow
 
 AI agents, web chat, unified inbox, appointment scheduling, billing, frontend, workflows and RAG are **not implemented yet**.
@@ -42,6 +42,7 @@ The API defaults to http://localhost:5088 for the launch profile.
 - GET /api/organizations/{organizationId}/contacts/{contactId} — get contact
 - PUT /api/organizations/{organizationId}/contacts/{contactId} — update contact
 - DELETE /api/organizations/{organizationId}/contacts/{contactId} — soft-delete contact
+- GET /api/organizations/{organizationId}/audit-events?page=1&pageSize=25 — tenant-scoped audit history (Owner/Admin only; max 100 rows/page)
 - GET /health/live and GET /health/ready — health probes
 
 For protected routes, send Authorization: Bearer ACCESS_TOKEN where ACCESS_TOKEN is returned by /auth/login. Built-in Identity bearer tokens are **opaque, not JWTs**.

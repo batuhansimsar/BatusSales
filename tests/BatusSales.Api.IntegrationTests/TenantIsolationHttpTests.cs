@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using BatusSales.Api.Data;
+using BatusSales.Api.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -166,6 +167,69 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
             x.OrganizationId == organizationId &&
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
+    }
+
+    [Fact]
+    public async Task AuditHistoryIsScopedToTenantAndManagerRole()
+    {
+        using var owner = CreateClient();
+        using var other = CreateClient();
+        await AuthenticateAsync(owner);
+        await AuthenticateAsync(other);
+
+        var ownerOrg = await CreateOrganizationAsync(owner, "Audit organization");
+        var otherOrg = await CreateOrganizationAsync(other, "Separate organization");
+        await CreateContactAsync(owner, ownerOrg);
+        var auditPath = $"/api/organizations/{ownerOrg}/audit-events";
+
+        var anonymousClient = CreateClient();
+        using (anonymousClient)
+        {
+            Assert.Equal(HttpStatusCode.Unauthorized,
+                (await anonymousClient.GetAsync(auditPath)).StatusCode);
+        }
+
+        // Owner can inspect only this organization's existing audit events.
+        var firstPage = await owner.GetAsync(auditPath + "?page=1&pageSize=1");
+        Assert.Equal(HttpStatusCode.OK, firstPage.StatusCode);
+        var pageJson = await firstPage.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(2, pageJson.GetProperty("total").GetInt32());
+        Assert.Single(pageJson.GetProperty("items").EnumerateArray());
+        var all = await owner.GetFromJsonAsync<JsonElement>(auditPath + "?pageSize=100");
+        var rows = all.GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(2, rows.Count);
+        Assert.All(rows, entry =>
+            Assert.Equal(ownerOrg, entry.GetProperty("organizationId").GetGuid()));
+        Assert.Contains(rows, entry =>
+            entry.GetProperty("action").GetString() == "organization.created");
+        Assert.Contains(rows, entry =>
+            entry.GetProperty("action").GetString() == "contact.created");
+
+        // Non-members cannot even infer whether another tenant has audit events.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await other.GetAsync(auditPath)).StatusCode);
+
+        // A staff member assigned the Agent role may use CRM but cannot
+        // inspect privileged audit history for that organization.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var otherUserId = await db.Memberships
+                .Where(x => x.OrganizationId == otherOrg)
+                .Select(x => x.UserId).SingleAsync();
+            db.Memberships.Add(new OrganizationMembership
+            {
+                OrganizationId = ownerOrg,
+                UserId = otherUserId,
+                Role = OrganizationRole.Agent
+            });
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await other.GetAsync(auditPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await other.GetAsync($"/api/organizations/{otherOrg}/audit-events")).StatusCode);
     }
 
     private HttpClient CreateClient() =>
