@@ -1,0 +1,23 @@
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+*.user
+# Node / Next
+**/node_modules/
+**/.next/
+**/.turbo/
+**/out/
+*.tsbuildinfo
+# Environment / credentials
+.env
+.env.*
+!.env.example
+**/appsettings.Development.local.json
+*.pfx
+*.pem
+# Local/IDE
+.DS_Store
+.idea/
+.vscode/
+coverage/

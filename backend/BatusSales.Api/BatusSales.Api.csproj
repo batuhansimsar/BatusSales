@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <AssemblyName>BatusSales.Api</AssemblyName>
+    <RootNamespace>BatusSales.Api</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../BatusSales.Core/BatusSales.Core.csproj" />
+  </ItemGroup>
+</Project>
