@@ -48,3 +48,12 @@ Acceptance criteria:
 5. Implement on a new branch; prefer one topic / one reviewable commit.
 6. Run automated tests and review security implications.
 7. Update this ledger with branch/commit/PR and evidence; never mark proposed features done prematurely.
+
+## Security checkpoint — 2026-10-21
+
+- Reviewed upstream advisories GHSA-673q-mjm6-r5xr, GHSA-2464-fhr4-w9xw, and GHSA-p3m5-59mp-jv5r (released 2026-10-14): affected Next.js 16.0.0–16.4.0, patched in 16.4.1.
+- Raised `apps/web/package.json` Next.js minimum to `^16.4.1`, and React/React DOM minimum to `^19.2.6` to avoid known older vulnerable RSC dependencies.
+- Added CI production dependency audit, failing on high/critical advisories. This is a proposed patch; results must be confirmed in GitHub Actions. A committed npm lockfile and reproducible `npm ci` remain follow-up requirements.
+- Other open foundation PRs overlap this scaffold: **choose one canonical foundation and reconcile unique functionality before merge**. Do not merge multiple parallel scaffolds without conflict review. The isolated Booking Domain PR should be considered separately after auth/tenant enforcement is established.
+
+References: https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr ; https://github.com/vercel/next.js/security/advisories/GHSA-2464-fhr4-w9xw ; https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r
