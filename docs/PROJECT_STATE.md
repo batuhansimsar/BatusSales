@@ -49,3 +49,17 @@ Validation status:
 3. Check current stable packages, security advisories, platform changes and integration requirements.
 4. Take the smallest valuable P0 milestone, develop it on a feature branch, add tests.
 5. Update this file with exact SHA, tested status, completed work and next blockers.
+
+## Proposed dependent security increment (not merged)
+
+After PR #15 (role-restricted contact deletion), the proposed tenant-isolation patch:
+- Activates DbContext tenant scope only after database-backed membership verification.
+- Denies contact reads without verified membership and includes tenant ID in the soft-delete filter.
+- Rejects cross-tenant contact writes and changes to Contact.OrganizationId across all SaveChanges overloads.
+- Adds five InMemory EF tests covering cross-tenant reads, denied membership, and write denial.
+- Has not undergone PostgreSQL-backed integration or local .NET SDK verification.
+
+This is an additional defense-in-depth layer, not production-ready tenant isolation.
+A future dedicated gate must test actual PostgreSQL transactions, bypass via IgnoreQueryFilters,
+direct SQL and background jobs, and must evaluate database RLS/composite foreign keys.
+Do not merge dependent PRs before selecting the canonical foundation (issue #14).

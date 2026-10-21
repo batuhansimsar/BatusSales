@@ -13,6 +13,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
+    // Activated only by TenantAccess after verifying the caller's database membership.
+    // A missing/denied membership must never default to a tenant.
+    public Guid? AuthorizedTenantId { get; private set; }
+
+    internal void ClearAuthorizedTenant() => AuthorizedTenantId = null;
+
+    internal void SetAuthorizedTenant(Guid organizationId)
+    {
+        if (organizationId == Guid.Empty)
+            throw new ArgumentException("Organization ID cannot be empty.", nameof(organizationId));
+        AuthorizedTenantId = organizationId;
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -38,7 +51,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.Property(x => x.Name).IsRequired().HasMaxLength(120);
             entity.Property(x => x.Email).HasMaxLength(254);
             entity.Property(x => x.Phone).HasMaxLength(40);
-            entity.HasQueryFilter(x => !x.IsDeleted);
+            // EF parameterizes the DbContext property: one compiled model can serve
+            // different authorized organizations without caching a tenant ID.
+            // Keep soft-delete and tenant rules together; query filters are
+            // defense-in-depth, not a substitute for endpoint authorization.
+            entity.HasQueryFilter(x => !x.IsDeleted && x.OrganizationId == AuthorizedTenantId);
             entity.HasOne<Organization>().WithMany()
                 .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -51,4 +68,39 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
                 .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         });
     }
+
+    // Cover both synchronous and async SaveChanges overloads. A tenant filter
+    // only governs reads; it cannot prevent tracked cross-tenant writes.
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ValidateContactMutations();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateContactMutations();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateContactMutations()
+    {
+        foreach (var entry in ChangeTracker.Entries<Contact>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            if (AuthorizedTenantId is not Guid tenantId ||
+                entry.Entity.OrganizationId != tenantId ||
+                (entry.State == EntityState.Modified &&
+                 entry.Property(x => x.OrganizationId).IsModified))
+            {
+                throw new UnauthorizedAccessException(
+                    "Contact writes require verified tenant membership and a matching, immutable organization.");
+            }
+        }
+    }
+
 }
