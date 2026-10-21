@@ -131,3 +131,15 @@ Milestone: **P0 development foundation, NOT a paid-pilot-ready MVP**.
 3. If an existing PR or branch already handles it, improve or review that workstream; do not recreate its code, migration, test or commit under a different name.
 4. Research official patch/security guidance relevant to the next smallest P0 slice; keep new infrastructure limited to demonstrated need.
 5. Test against disposable PostgreSQL and CI; record exact new SHA and pass/fail, and do not claim production readiness without the release gates above.
+
+
+## 2026-10-21 P0 browser-auth boundary — PR #23 (not merged)
+
+- Require the ASP.NET Core Identity bearer scheme for Organization and Contact APIs.
+- Block login options `useCookies=true` / `useSessionCookies=true` until
+  CSRF-safe browser authentication/BFF is implemented.
+- Keep bearer login (`useCookies=false`) operational.
+- Add disposable PostgreSQL-backed HTTP regression coverage.
+- Pending: CI verification at PR #23 HEAD, production Identity email confirmation,
+  reviewed migrations, tenant isolation audit, frontend browser-session strategy.
+- Microsoft CSRF guidance: https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0

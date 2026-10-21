@@ -10,7 +10,7 @@ public static class ContactEndpoints
     public static void MapContactEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/organizations/{organizationId:guid}/contacts")
-            .RequireAuthorization();
+            .RequireAuthorization("BatusSalesBearer");
 
         group.MapGet("", async (
             Guid organizationId, int? page, int? pageSize, HttpContext context,
