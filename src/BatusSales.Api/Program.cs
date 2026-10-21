@@ -39,4 +39,4 @@ app.MapGet("/api/v1/system/info", () =>
 app.Run();
 
 public sealed record SystemInfo(string Product, string ApiVersion, string Phase);
-public partial class Program;
+public partial class Program { }
