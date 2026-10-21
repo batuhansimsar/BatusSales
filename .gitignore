@@ -1,0 +1,22 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+TestResults/
+
+# Node / Next
+**/node_modules/
+**/.next/
+**/out/
+*.tsbuildinfo
+
+# Secrets & runtime
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.key
+.DS_Store
+coverage/
