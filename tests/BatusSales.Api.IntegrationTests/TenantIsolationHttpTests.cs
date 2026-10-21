@@ -168,6 +168,61 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+    [Fact]
+    public async Task ContactDeleteHonorsLiveRoleChangesAndPreservesDataAfterDenial()
+    {
+        using var client = CreateClient();
+        await AuthenticateAsync(client);
+
+        var organizationId = await CreateOrganizationAsync(client, "Role change organization");
+        var contactId = await CreateContactAsync(client, organizationId);
+        var path = $"/api/organizations/{organizationId}/contacts/{contactId}";
+
+        // Change permissions in authoritative PostgreSQL. The already-issued
+        // bearer token must not retain the original Owner's delete permission.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(x => x.OrganizationId == organizationId);
+            membership.Role = BatusSales.Api.Domain.OrganizationRole.Agent;
+            await db.SaveChangesAsync();
+        }
+
+        var forbidden = await client.DeleteAsync(path);
+        Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var contact = await db.Contacts.IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(x => x.Id == contactId);
+            Assert.False(contact.IsDeleted);
+            Assert.Equal(0, await db.AuditEvents.CountAsync(x =>
+                x.OrganizationId == organizationId && x.EntityId == contactId &&
+                x.Action == "contact.deleted"));
+
+            // The very same bearer token should regain permission only when the
+            // database membership becomes Admin, without re-authentication.
+            var membership = await db.Memberships.SingleAsync(x => x.OrganizationId == organizationId);
+            membership.Role = BatusSales.Api.Domain.OrganizationRole.Admin;
+            await db.SaveChangesAsync();
+        }
+
+        var allowed = await client.DeleteAsync(path);
+        Assert.Equal(HttpStatusCode.NoContent, allowed.StatusCode);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var contact = await db.Contacts.IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(x => x.Id == contactId);
+            Assert.True(contact.IsDeleted);
+            Assert.Equal(1, await db.AuditEvents.CountAsync(x =>
+                x.OrganizationId == organizationId && x.EntityId == contactId &&
+                x.Action == "contact.deleted"));
+        }
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
