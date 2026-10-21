@@ -36,3 +36,12 @@ The initial review found an empty repo. During the review, a different GitHub se
 - .NET 10 is active LTS as of October 2026.
 - `DateTimeOffset` is used for unambiguous instants; a named time zone is still needed for business-hours rules.
 - PostgreSQL `btree_gist` + a GiST exclusion constraint should enforce the overlap invariant for concurrent writes.
+
+## Increment: DST-safe wall-clock conversion (2026-10-21)
+
+- Added `BookingLocalTime.CreateAppointment` to convert a configured IANA business time zone to UTC before applying existing appointment/availability rules.
+- Explicitly rejects local `DateTimeKind.Local/Utc`, nonexistent spring-forward times, and ambiguous fall-back times; avoids the runtime's implicit standard-time choice.
+- Added six executable checks: Istanbul conversion, Berlin missing/repeated hours, pre-interpreted UTC input, true elapsed interval across DST, and invalid duration.
+- No booking API, staff hours, migration, EF integration or production capability is claimed. PR #1 remains dependent on canonical foundation selection tracked by issue #14.
+- Local .NET SDK unavailable; GitHub Actions booking CI must run on this commit before test-success claims.
+- References: https://learn.microsoft.com/en-us/dotnet/api/system.timezoneinfo.isambiguoustime and https://learn.microsoft.com/en-us/dotnet/api/system.timezoneinfo.isinvalidtime

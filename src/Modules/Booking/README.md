@@ -5,6 +5,7 @@ This module is a **pure .NET 10 booking-domain foundation with a tested PostgreS
 It provides:
 - Immutable appointments with nonempty tenant/staff/appointment IDs
 - UTC-normalized instants and positive time intervals
+- IANA business time zone conversion for entered wall-clock times; rejects nonexistent and repeated DST times instead of silently guessing an offset
 - Basic pending/confirmed/cancelled states
 - Tenant- and staff-scoped interval-overlap preflight
 - Self-reschedule and cancellation behavior
@@ -27,6 +28,8 @@ psql -X -v ON_ERROR_STOP=1 -d booking_test \
 ```
 
 GitHub Actions runs both sets of checks against PostgreSQL 17. The SQL regression script rolls back test inserts, but **the schema script creates persistent tables**. Never aim these commands at a customer database.
+
+Use `BookingLocalTime.CreateAppointment(..., localStart, localEnd, "Europe/Istanbul")` with `DateTimeKind.Unspecified` values for business-entered times. This helper fails closed on DST gaps/overlaps; a future UI must ask for an explicit offset when customers need a repeated-hour slot. Time zone identifiers must come from validated business settings; it is **not** a tenant authorization layer or a working-hours policy.
 
 **Still required before a booking API can launch:** integration into the selected Identity/Tenancy backend and real EF migrations; authenticated tenant membership and RBAC; service/staff working hours, holidays and business time zones (DST); request idempotency, cancellation policy and audit; parallel-client authenticated integration tests. The SQL contract has no organization/staff foreign keys because the canonical schema has not been chosen.
 

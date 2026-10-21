@@ -38,6 +38,49 @@ var checks = new (string Name, Action Run)[]
         Assert(!BookingAvailability.IsAvailable(local, [original]));
         Assert(local.StartUtc.Offset == TimeSpan.Zero);
     }),
+    ("Istanbul business wall time maps to the intended UTC slot", () =>
+    {
+        var local = BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 10, 22, 12, 30, 0, DateTimeKind.Unspecified),
+            "Europe/Istanbul");
+        Assert(local.StartUtc == start && local.EndUtc == end);
+        Assert(!BookingAvailability.IsAvailable(local, [original]));
+    }),
+    ("spring-forward missing wall time is rejected", () =>
+        Throws<ArgumentException>(() => BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 3, 29, 2, 30, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 3, 29, 3, 30, 0, DateTimeKind.Unspecified),
+            "Europe/Berlin"))),
+    ("fall-back repeated wall time is rejected", () =>
+        Throws<ArgumentException>(() => BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 10, 25, 2, 30, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 10, 25, 3, 30, 0, DateTimeKind.Unspecified),
+            "Europe/Berlin"))),
+    ("wall time rejects a pre-interpreted UTC DateTime", () =>
+        Throws<ArgumentException>(() => BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 10, 22, 12, 30, 0, DateTimeKind.Unspecified),
+            "Europe/Istanbul"))),
+    ("DST transition uses elapsed UTC time, not wall-clock subtraction", () =>
+    {
+        var acrossTransition = BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 10, 25, 1, 30, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 10, 25, 3, 30, 0, DateTimeKind.Unspecified),
+            "Europe/Berlin");
+        Assert(acrossTransition.EndUtc - acrossTransition.StartUtc == TimeSpan.FromHours(3));
+    }),
+    ("business local intervals must still have positive UTC duration", () =>
+        Throws<ArgumentException>(() => BookingLocalTime.CreateAppointment(
+            Guid.NewGuid(), tenant, staff,
+            new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 10, 22, 12, 0, 0, DateTimeKind.Unspecified),
+            "Europe/Istanbul"))),
     ("empty tenant identifier is rejected", () =>
         Throws<ArgumentException>(() =>
             Appointment.Create(Guid.NewGuid(), Guid.Empty, staff, start, end))),
