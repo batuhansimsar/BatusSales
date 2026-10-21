@@ -45,3 +45,9 @@ jobs:
             postgres:17 psql -h 127.0.0.1 -U postgres -d booking_ci -X -v ON_ERROR_STOP=1 \
               -f src/Modules/Booking/Sql/001_appointments.sql \
               -f src/Modules/Booking/Sql/test_appointments.sql
+      - name: Verify concurrent booking inserts cannot double-book
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/workspace:ro" -w /workspace \
+            -e PGPASSWORD=booking_ci_password -e PGDATABASE=booking_ci \
+            postgres:17 bash src/Modules/Booking/Sql/test_parallel_exclusion.sh
