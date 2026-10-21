@@ -10,6 +10,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: batussales_test
+          POSTGRES_PASSWORD: ci_test_password_only
+          POSTGRES_DB: batussales_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U batussales_test -d batussales_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Disposable service database; never use production credentials.
+      BATUSSALES_TEST_POSTGRES: "Host=127.0.0.1;Port=5432;Database=batussales_test;Username=batussales_test;Password=ci_test_password_only"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -17,5 +34,7 @@ jobs:
           dotnet-version: 10.0.x
       - name: Build API
         run: dotnet build src/BatusSales.Api/BatusSales.Api.csproj --configuration Release
-      - name: Run tests
+      - name: Require PostgreSQL test configuration
+        run: test -n "$BATUSSALES_TEST_POSTGRES"
+      - name: Run unit and PostgreSQL integration tests
         run: dotnet test tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj --configuration Release
