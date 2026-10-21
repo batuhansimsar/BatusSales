@@ -24,8 +24,12 @@ public static class DatabaseReadiness
             _ = await db.Users.AsNoTracking().AnyAsync(ct);
             _ = await db.Organizations.AsNoTracking().AnyAsync(ct);
             _ = await db.Memberships.AsNoTracking().AnyAsync(ct);
-            _ = await db.Contacts.AsNoTracking().AnyAsync(ct);
-            _ = await db.AuditEvents.AsNoTracking().AnyAsync(ct);
+            // The verified tenant is intentionally absent in an infrastructure
+            // probe. Ignoring tenant/soft-delete filters here prevents an EF
+            // predicate from constant-folding the table check away. These
+            // queries return only bools; they never expose customer rows.
+            _ = await db.Contacts.IgnoreQueryFilters().AsNoTracking().AnyAsync(ct);
+            _ = await db.AuditEvents.IgnoreQueryFilters().AsNoTracking().AnyAsync(ct);
             return true;
         }
         catch (DbException)
