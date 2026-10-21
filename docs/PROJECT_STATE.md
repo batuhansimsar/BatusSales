@@ -1,118 +1,55 @@
-# BatuSales project state
+# BatusSales — authoritative project state
 
-Date: 2026-10-21
-Repository: batuhansimsar/BatusSales
-Default branch: main (README-only baseline 08fef80b8e14d1627a0fbad5348f9da872548fa7)
+Last reconciled: 2026-10-21 (Europe/Istanbul)
+Repository: https://github.com/batuhansimsar/BatusSales
+Milestone: **P0 development foundation, NOT a paid-pilot-ready MVP**.
 
-## Coordination / duplicate prevention
+## Canonical baseline on main
 
-At the latest inspection, ten draft PRs (#1-#8, #11, #12) were open.
-PRs #2-#8, #11 and #12 contain competing foundations with different directory
-layouts, authentication methods and tenancy patterns. They are alternatives,
-**not** ten independent components to merge. PR #1 is a separate booking-domain
-preflight without database-level concurrency guarantees. Do not merge multiple
-foundation PRs until the architecture and security checks are reconciled.
+- **#12 merged to main:** merge commit `a2b3bd5935372311954e054266ebf25fa7e6265d`. Use the existing `src/BatusSales.Api` + `tests/` layout. Never scaffold another competing Identity/Tenancy/CRM backend.
+- #12 incorporated the distinct reviewed ideas from **#15 (Owner/Admin CRM delete)** and **#16 (EF Core tenant query/write isolation and concurrency token)** as a combined commit `e885a734` and descendants. Do not cherry-pick those changes again.
+- **#21 merged to main:** merge commit `d6cd72bcee006c455b3949a9ce59432cc48e5b8f`. PostgreSQL HTTP integration regression proves an already-issued token loses tenant contact access when membership is revoked. No duplicate test should be added on another foundation.
+- Other foundation PRs (#4/#5/#6/#8/#11) are **alternatives**, not sequential migrations. #2/#7 contain alternative UI starter ideas to selectively evaluate; #1 holds booking-domain ideas, not an integrated booking service. #17/#20 relate to #8's Identity startup and are not changes to canonical main. #22 duplicates the revocation security invariant on #8's incompatible code base. Review unique ideas only; do not merge competing scaffolds.
 
-This document tracks branch `feat/mvp-foundation-tenant-crm` (PR #12) as
-a **candidate**, not a selected or merged canonical foundation.
+## Present in main (development scope, not release guarantees)
 
-## Implemented in PR #12 (not main)
+- ASP.NET Core / .NET 10 API, EF Core + PostgreSQL development Docker Compose.
+- ASP.NET Core Identity registration/login/refresh for **Development only**; no production email verification/provider.
+- Authenticated organization creation, Owner membership and database-verified membership lookup on every tenant CRM request.
+- Contacts create/list/read/update/soft-delete; server-side Owner/Admin only soft-delete, other members cannot delete.
+- Contact tenant-scoped EF read filter, default-deny without verified tenant, guarded tracked writes, immutable tenant assignment, and organization ID concurrency token.
+- Audit-event model, basic rate limiting, health/readiness endpoints.
+- Unit tests, SQLite tenant-write regressions, real PostgreSQL HTTP cross-tenant tests and membership-revocation tests.
+- GitHub Actions API build/test, PostgreSQL integration and NuGet direct+transitive dependency audit gates (moderate+).
 
-- .NET 10 API using PostgreSQL, EF Core and ASP.NET Core Identity opaque tokens.
-- Development-only registration/login/refresh and disposable DB bootstrap.
-- Organization creation with Owner membership and membership-checked contact endpoints.
-- Contact create/list/read/update/soft-delete with explicit organization predicates.
-- Audit events, liveness/readiness probes, baseline rate limiting and unit tests.
-- Docker Compose and GitHub Actions CI.
+## Verified checks and caveats
 
-## Increment — PostgreSQL HTTP isolation tests (2026-10-21)
+- #12 canonical head `7f2a7e0`: recorded successful CI and dependency-audit workflow runs; prior PostgreSQL and API jobs on #12 passed.
+- #16 security checks passed before reconciliation; #21 head `98eae443` CI passed before merge into main.
+- **Do not infer post-merge main workflow success from parent PR success.** Verify the current main SHA and its Actions results every session.
+- There is no deployment, production-readiness certification, customer-data authorization, or business validation.
 
-New code on this *existing branch* (no duplicate foundation or competing PR):
-- `tests/BatusSales.Api.IntegrationTests/` — separate integration test project.
-- Authenticate two separate users through actual HTTP register/login, create
-  separate organizations, and test member vs non-member operations against
-  an ephemeral PostgreSQL service: list, read, create, update, delete.
-- Verify anonymous access is denied; soft-deleted rows disappear from the API
-  but remain soft-deleted in relational storage; rejected update does not
-  change stored records or create an update audit event.
-- `.github/workflows/ci.yml` — a PostgreSQL 17 service CI job runs this
-  test project; the existing unit-test job remains intact.
-- Integration suite refuses to run without an explicitly named
-  `batussales_test` database and `BATUSSALES_TEST_POSTGRES`.
-- First integration test commits: 01ce545, 3afd4b1; CI wiring: 4f66623.
+## P0 release blockers (order by dependency/risk)
 
-### Validation and limitations
+1. EF Core **versioned migrations** and reviewed SQL/bundle, replacing development-only `EnsureCreated`; test fresh-install and schema upgrade on disposable PostgreSQL. Never run `EnsureCreated` on production customer data.
+2. Real transactional email + confirmed-email login/recovery; secure browser session (cookie/BFF, CSRF, TLS/reverse-proxy settings); team invitations, owner/admin/agent authorization matrix and negative authenticated HTTP tests.
+3. Database defense in depth: RLS/composite foreign keys review for all tenant-owned tables, direct SQL/bulk write boundaries, audit/access controls, deletion/retention/consent, backups and restore test, secrets and telemetry.
+4. User-facing organization onboarding frontend and **web chat widget -> inbox -> human handoff -> grounded FAQ agent** vertical flow. Scope one target service sector; add tested AI budget/tool authorization and human confirmation.
+5. CRM deals/pipeline, staff/services/booking with PostgreSQL overlap exclusion and concurrency tests, minimal workflow rules, dashboard, usage quotas and billing before accepting a paid pilot.
+6. P1 integrations (WhatsApp/Instagram/calendar), RAG/pgvector, marketing and workflow builder remain postponed until P0 pilot evidence. P2 voice/SSO/multi-branch remains later.
 
-- Previous six unit tests passed in GitHub Actions (run 39655088247).
-- **New integration tests are not considered passing until the GitHub Actions
-  postgres-integration job completes successfully.** No local .NET SDK.
-- This tests HTTP membership gates with real PostgreSQL; it does **not**
-  establish DB row-level security, production token security, or cross-tenant
-  protection against direct unsafe SQL, and does not replace independent review.
-- Existing dev-only `EnsureCreated` is not a real migration workflow.
-- Do not deploy to paying tenants or merge competing backend PRs without review.
+## Relevant current official technology guidance
 
-## Not yet completed (P0)
+- .NET 10 LTS **10.0.13** security patch: https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+- EF Core 10 global tenant filters can be disabled by `IgnoreQueryFilters` and do not replace endpoint checks/database policies: https://learn.microsoft.com/en-us/ef/core/querying/filters
+- EF Core recommends reviewed migration bundles or SQL scripts for production, with least-privilege deployment identity: https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying
+- `EnsureCreated` is for disposable databases, not compatible with migration-based lifecycle: https://learn.microsoft.com/en-us/ef/core/managing-schemas/ensure-created
+- Identity browser clients should normally use cookie-backed sessions with CSRF protection: https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity-api-authorization
 
-- Review/select one canonical foundation and safely port only unique work.
-- Versioned EF migrations, safe production identity/email confirmation,
-  authorization negative cases, defense-in-depth RLS assessment.
-- Secure browser authentication, CSRF controls and invitation/role workflows.
-- Product onboarding frontend and web chat widget to unified inbox.
-- Grounded AI agent with least-privilege tool policy, audit and human handoff.
-- CRM deal pipeline; booking with database-level overlap exclusion;
-  reliable workflow execution; dashboard; quotas/billing.
-- TLS/secret hardening, backup/restore tests, deletion and consent workflows,
-  secure logs, monitoring and staged deployment.
+## Required anti-duplication workflow each session
 
-## Technology review (2026-10-21)
-
-- .NET 10 LTS + EF Core 10 remain appropriate for the proposed backend.
-- Official Microsoft ASP.NET Core testing guidance supports
-  `WebApplicationFactory` for authenticated HTTP integration tests.
-- GitHub Actions officially supports disposable PostgreSQL service containers.
-- OWASP recommends enforcing AI tool authorization in application code,
-  minimizing privileges and requiring human approval for high-impact actions.
-- Do not add Redis, RabbitMQ, pgvector, multi-agent frameworks or channel
-  integrations until an actual P0 vertical slice needs them.
-
-References:
-- https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core
-- https://learn.microsoft.com/en-us/aspnet/core/testing/integration-testing
-- https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers
-- https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html
-
-## Iteration protocol
-
-1. Inspect `main` HEAD, recent commits, open PRs, changed files and status.
-2. Compare actual code/tests (not claims) with the P0/P1/P2 roadmap.
-3. Avoid committing the same feature on another branch.
-4. Verify relevant current platform/security guidance before new dependencies.
-5. Improve one scoped increment; add tests and preserve production safety.
-6. Record exact commit SHA, CI outcome, blockers and next acceptance criteria.
-
-## Increment — contact DB query/write guards (stacked PR #16)
-
-- Base PR #12 was refreshed with PostgreSQL HTTP tenant-isolation tests before this merge.
-- Adapted #8's tenant-scoped contact query and tracked-write protections to #12's existing Contact CRUD.
-- A successful current membership check activates a tenant in the scoped EF context; a denied check clears it.
-- `Contact.OrganizationId` is an EF concurrency token, so detached updates/soft-delete writes include original tenant ownership in the SQL predicate.
-- Added SQLite relational regression tests for no-membership read denial, cross-tenant sync/async saves, and forged cross-tenant contact IDs.
-- PR #16 first commit `ae137a2` passed the API and PostgreSQL integration jobs: https://github.com/batuhansimsar/BatusSales/actions/runs/39655874518
-- **This stacked contribution is not merged to main**, and PostgreSQL RLS / unsafe bulk SQL / migrations / production auth remain open gates.
-- Refreshed against PR #12 base commit `1bc1d2ce588d` without force push or rewriting existing commits.
-
-## Consolidation candidate — CRM roles + DB isolation
-
-The canonical foundation candidate PR #12 now proposes one combined code path
-from the already reviewed PR #15 (Owner/Admin contact delete + RBAC tests)
-and PR #16 (context-scoped Contact read/write guards, concurrency token and
-SQLite tests). The combined merge commit preserves the two PR commits as
-parents; it does **not** re-implement a parallel backend or merge to main.
-The privileged delete code now activates the same verified tenant context
-after loading a server-side membership role, ensuring the DB query filter
-does not falsely block legitimate deletes.
-
-Validation for this combined tree requires its own CI check. Remaining blockers:
-PostgreSQL tenant/RBAC HTTP negative tests, reviewed EF migrations, RLS/unsafe bulk SQL
-review and production email/CSRF/secrets setup.
+1. Inspect **live** main HEAD/tree, open and closed PRs, branches, commits, issue #14, this file and GitHub Actions before touching code.
+2. Compare the feature against the user's P0/P1/P2 roadmap and classify: merged / proposed / missing / blocked.
+3. If an existing PR or branch already handles it, improve or review that workstream; do not recreate its code, migration, test or commit under a different name.
+4. Research official patch/security guidance relevant to the next smallest P0 slice; keep new infrastructure limited to demonstrated need.
+5. Test against disposable PostgreSQL and CI; record exact new SHA and pass/fail, and do not claim production readiness without the release gates above.
