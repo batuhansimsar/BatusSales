@@ -1,0 +1,25 @@
+name: API quality gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dotnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore tests and API
+        run: dotnet restore tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj
+      - name: Build
+        run: dotnet build tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj --configuration Release --no-restore
+      - name: Test
+        run: dotnet test tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj --configuration Release --no-build --no-restore
