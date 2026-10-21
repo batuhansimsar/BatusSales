@@ -13,6 +13,11 @@ public sealed class BatusSalesDbContext(
     DbContextOptions<BatusSalesDbContext> options,
     ITenantContext tenantContext) : DbContext(options)
 {
+    // EF Core substitutes context instance members per query. Do not close over
+    // a scoped tenant service directly inside a cached model expression.
+    public Guid CurrentTenantId => tenantContext.OrganizationId;
+    public bool HasTenant => tenantContext.HasTenant;
+
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
@@ -36,7 +41,7 @@ public sealed class BatusSalesDbContext(
             entity.Property(x => x.Email).HasMaxLength(320);
             entity.Property(x => x.Phone).HasMaxLength(32);
             entity.HasIndex(x => new { x.OrganizationId, x.Email });
-            entity.HasQueryFilter(x => tenantContext.HasTenant && x.OrganizationId == tenantContext.OrganizationId);
+            entity.HasQueryFilter(x => HasTenant && x.OrganizationId == CurrentTenantId);
         });
 
         modelBuilder.Entity<Conversation>(entity =>
@@ -44,7 +49,7 @@ public sealed class BatusSalesDbContext(
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Channel).HasMaxLength(32).IsRequired();
             entity.HasIndex(x => new { x.OrganizationId, x.ContactId });
-            entity.HasQueryFilter(x => tenantContext.HasTenant && x.OrganizationId == tenantContext.OrganizationId);
+            entity.HasQueryFilter(x => HasTenant && x.OrganizationId == CurrentTenantId);
         });
 
         modelBuilder.Entity<ConversationMessage>(entity =>
@@ -52,27 +57,28 @@ public sealed class BatusSalesDbContext(
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Body).HasMaxLength(10000).IsRequired();
             entity.HasIndex(x => new { x.OrganizationId, x.ConversationId, x.CreatedAtUtc });
-            entity.HasQueryFilter(x => tenantContext.HasTenant && x.OrganizationId == tenantContext.OrganizationId);
+            entity.HasQueryFilter(x => HasTenant && x.OrganizationId == CurrentTenantId);
         });
 
         modelBuilder.Entity<Booking>(entity =>
         {
             entity.HasKey(x => x.Id);
             entity.HasIndex(x => new { x.OrganizationId, x.StaffId, x.StartsAtUtc });
-            entity.HasQueryFilter(x => tenantContext.HasTenant && x.OrganizationId == tenantContext.OrganizationId);
+            entity.HasQueryFilter(x => HasTenant && x.OrganizationId == CurrentTenantId);
         });
     }
 
-    public override int SaveChanges()
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnforceTenantWrites();
-        return base.SaveChanges();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         EnforceTenantWrites();
-        return base.SaveChangesAsync(cancellationToken);
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     private void EnforceTenantWrites()
