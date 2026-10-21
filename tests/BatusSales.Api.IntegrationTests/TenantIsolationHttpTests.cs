@@ -170,7 +170,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
     }
 
     [Fact]
-    public async Task DowngradedOwnerCannotDeleteWithStillValidBearerToken()
+    public async Task LiveRoleDowngradeAndPromotionUseCurrentMembershipWithExistingToken()
     {
         using var client = CreateClient();
         await AuthenticateAsync(client);
@@ -205,6 +205,28 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.False(savedContact.IsDeleted);
         Assert.Equal("Original", savedContact.Name);
         Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.deleted"));
+
+        // PromotionWithExistingToken: an Admin promotion is recognized without
+        // re-issuing the access token, and the authorized deletion is audited.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(
+                x => x.OrganizationId == organizationId);
+            membership.Role = OrganizationRole.Admin;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.DeleteAsync(contactPath)).StatusCode);
+
+        await using var promotedScope = factory.Services.CreateAsyncScope();
+        var promotedDb = promotedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deleted = await promotedDb.Contacts.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(x => x.Id == contactId);
+        Assert.True(deleted.IsDeleted);
+        Assert.Equal(1, await promotedDb.AuditEvents.CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.deleted"));
     }
 
