@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using BatusSales.Api.Data;
+using BatusSales.Api.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -168,6 +169,69 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+
+    [Fact]
+    public async Task ContactDeletionChecksLiveAgentAndAdminRolesWithRealPostgres()
+    {
+        using var owner = CreateClient();
+        using var agent = CreateClient();
+        await AuthenticateAsync(owner);
+        var agentEmail = await AuthenticateAsync(agent);
+
+        var organizationId = await CreateOrganizationAsync(owner, "Role boundary organization");
+        var contactId = await CreateContactAsync(owner, organizationId);
+        var contactPath = $"/api/organizations/{organizationId}/contacts/{contactId}";
+        Guid agentUserId;
+
+        // Team invitation APIs are not implemented yet: seed only a test membership
+        // in disposable PostgreSQL, while exercising real bearer HTTP authorization.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            agentUserId = await db.Users.Where(u => u.Email == agentEmail)
+                .Select(u => u.Id).SingleAsync();
+            db.Memberships.Add(new OrganizationMembership
+            {
+                OrganizationId = organizationId,
+                UserId = agentUserId,
+                Role = OrganizationRole.Agent
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // An Agent is a valid tenant member, but is not allowed to delete contacts.
+        Assert.Equal(HttpStatusCode.OK, (await agent.GetAsync(contactPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await agent.DeleteAsync(contactPath)).StatusCode);
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var contact = await db.Contacts.IgnoreQueryFilters().AsNoTracking()
+                .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
+            Assert.False(contact.IsDeleted);
+            Assert.Equal(0, await db.AuditEvents.CountAsync(x =>
+                x.OrganizationId == organizationId && x.Action == "contact.deleted"));
+
+            // Promote in PostgreSQL without reissuing the Agent's existing token.
+            var membership = await db.Memberships.SingleAsync(x =>
+                x.OrganizationId == organizationId && x.UserId == agentUserId);
+            membership.Role = OrganizationRole.Admin;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent, (await agent.DeleteAsync(contactPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await agent.GetAsync(contactPath)).StatusCode);
+
+        await using var verificationScope = factory.Services.CreateAsyncScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deleted = await verificationDb.Contacts.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
+        Assert.True(deleted.IsDeleted);
+        Assert.Equal(1, await verificationDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.deleted" &&
+            x.ActorId == agentUserId && x.EntityId == contactId));
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -175,7 +239,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             AllowAutoRedirect = false
         });
 
-    private static async Task AuthenticateAsync(HttpClient client)
+    private static async Task<string> AuthenticateAsync(HttpClient client)
     {
         var email = $"tenant-{Guid.NewGuid():N}@example.test";
         const string password = "Strong-Integration-Password_2026!";
@@ -193,6 +257,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var json = await login.Content.ReadFromJsonAsync<JsonElement>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", json.GetProperty("accessToken").GetString());
+        return email;
     }
 
     private static async Task<Guid> CreateOrganizationAsync(HttpClient client, string name)
