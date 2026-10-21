@@ -197,6 +197,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(HttpStatusCode.Forbidden,
             (await client.DeleteAsync(contactPath)).StatusCode);
 
+        // Test-only privileged inspection must not be hidden by tenant audit filters.
         // Verify no soft-delete and no forged contact.deleted audit entry.
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -204,7 +205,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .AsNoTracking().SingleAsync(x => x.Id == contactId);
         Assert.False(savedContact.IsDeleted);
         Assert.Equal("Original", savedContact.Name);
-        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.deleted"));
 
         // PromotionWithExistingToken: an Admin promotion is recognized without
@@ -226,7 +227,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var deleted = await promotedDb.Contacts.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(x => x.Id == contactId);
         Assert.True(deleted.IsDeleted);
-        Assert.Equal(1, await promotedDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(1, await promotedDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.deleted"));
     }
 
