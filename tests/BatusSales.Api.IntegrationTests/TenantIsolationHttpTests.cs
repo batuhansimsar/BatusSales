@@ -110,6 +110,52 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             x.OrganizationId == ownerOrg && x.Action == "contact.updated"));
     }
 
+    [Fact]
+    public async Task RevokedMembershipIsDeniedWithPreviouslyIssuedToken()
+    {
+        using var owner = CreateClient();
+        await AuthenticateAsync(owner);
+
+        var organizationId = await CreateOrganizationAsync(owner, "Revocation test organization");
+        var contactId = await CreateContactAsync(owner, organizationId);
+        var contactsPath = $"/api/organizations/{organizationId}/contacts";
+
+        // The bearer token remains valid, but the membership is removed in the
+        // authoritative PostgreSQL database. Authorization must fail immediately,
+        // not only after the access token expires or is refreshed.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(
+                x => x.OrganizationId == organizationId);
+            db.Memberships.Remove(membership);
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync(contactsPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"{contactsPath}/{contactId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.PostAsJsonAsync(contactsPath,
+                new { name = "Forbidden", email = "forbidden@example.test", phone = (string?)null }))
+            .StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.PutAsJsonAsync($"{contactsPath}/{contactId}",
+                new { name = "Forbidden", email = "forbidden@example.test", phone = (string?)null }))
+            .StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.DeleteAsync($"{contactsPath}/{contactId}")).StatusCode);
+
+        // The revoked user's token must not cause a write or delete in this tenant.
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var contact = await verifyDb.Contacts.AsNoTracking()
+            .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
+        Assert.Equal("Original", contact.Name);
+        Assert.False(contact.IsDeleted);
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
