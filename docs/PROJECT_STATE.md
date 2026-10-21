@@ -116,3 +116,12 @@ does not falsely block legitimate deletes.
 Validation for this combined tree requires its own CI check. Remaining blockers:
 PostgreSQL tenant/RBAC HTTP negative tests, reviewed EF migrations, RLS/unsafe bulk SQL
 review and production email/CSRF/secrets setup.
+
+
+## Increment — audit-event tenant read isolation (2026-10-21)
+
+- Applied the existing membership-activated EF tenant query boundary to `AuditEvent` reads.
+- Added a regression test for unset membership, cross-tenant guessed audit ID, switching between authorized tenants and denied membership clearing the scope.
+- Adjusted the PostgreSQL HTTP test's audit-count assertion to explicitly use `IgnoreQueryFilters()` so it still detects forbidden persisted audit writes after the read filter was added.
+- This is a read-layer defense only; privileged `IgnoreQueryFilters()`, raw SQL, RLS, immutable audit writes and production authorization still require explicit policy/review.
+- No additional identity scaffolding, contact implementation or competing PR was created.
