@@ -147,13 +147,25 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(HttpStatusCode.NotFound,
             (await owner.DeleteAsync($"{contactsPath}/{contactId}")).StatusCode);
 
+        // Revocation must also remove this organization from the same token's listing.
+        var listedOrganizations = await owner.GetFromJsonAsync<JsonElement>("/api/organizations");
+        Assert.False(listedOrganizations.EnumerateArray().Any(
+            x => x.GetProperty("id").GetGuid() == organizationId));
+
         // The revoked user's token must not cause a write or delete in this tenant.
         await using var verifyScope = factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var contact = await verifyDb.Contacts.AsNoTracking()
+        // Independent test-only database inspection bypasses future tenant query filters;
+        // never use IgnoreQueryFilters in an HTTP business endpoint.
+        var contact = await verifyDb.Contacts.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
         Assert.Equal("Original", contact.Name);
         Assert.False(contact.IsDeleted);
+        Assert.Equal(1, await verifyDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.created"));
+        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId &&
+            (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
     private HttpClient CreateClient() =>
