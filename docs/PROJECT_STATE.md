@@ -101,3 +101,18 @@ References:
 - PR #16 first commit `ae137a2` passed the API and PostgreSQL integration jobs: https://github.com/batuhansimsar/BatusSales/actions/runs/39655874518
 - **This stacked contribution is not merged to main**, and PostgreSQL RLS / unsafe bulk SQL / migrations / production auth remain open gates.
 - Refreshed against PR #12 base commit `1bc1d2ce588d` without force push or rewriting existing commits.
+
+## Consolidation candidate — CRM roles + DB isolation
+
+The canonical foundation candidate PR #12 now proposes one combined code path
+from the already reviewed PR #15 (Owner/Admin contact delete + RBAC tests)
+and PR #16 (context-scoped Contact read/write guards, concurrency token and
+SQLite tests). The combined merge commit preserves the two PR commits as
+parents; it does **not** re-implement a parallel backend or merge to main.
+The privileged delete code now activates the same verified tenant context
+after loading a server-side membership role, ensuring the DB query filter
+does not falsely block legitimate deletes.
+
+Validation for this combined tree requires its own CI check. Remaining blockers:
+PostgreSQL tenant/RBAC HTTP negative tests, reviewed EF migrations, RLS/unsafe bulk SQL
+review and production email/CSRF/secrets setup.
