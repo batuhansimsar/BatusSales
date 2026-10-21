@@ -23,9 +23,10 @@ Created:
 - Health checks, basic rate limits, tests, CI and Docker PostgreSQL
 
 Validation status:
-- Authoring environment has no dotnet SDK and cannot reach external package feeds.
-- Local compile/test execution could not be performed here.
-- PR CI build and unit test results require verification before merging.
+- The authoring environment has no local dotnet SDK.
+- Initial PR CI (run 39654854078, commit b68ee895) passed restore, build and all six xUnit tests.
+- New CI action versions are being checked on a follow-up PR run.
+- Real PostgreSQL integration and E2E tests remain pending.
 
 ## Not yet completed (P0)
 
