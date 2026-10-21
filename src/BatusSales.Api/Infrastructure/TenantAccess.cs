@@ -12,8 +12,15 @@ public static class TenantAccess
     public static async Task<bool> IsMemberAsync(
         AppDbContext db, ClaimsPrincipal user, Guid organizationId, CancellationToken ct)
     {
-        return TryGetUserId(user, out var userId)
-            && await db.Memberships.AsNoTracking().AnyAsync(
-                x => x.OrganizationId == organizationId && x.UserId == userId, ct);
+        // Never keep a previously authorized tenant after a failed membership check.
+        db.ClearTenant();
+        if (!TryGetUserId(user, out var userId))
+            return false;
+
+        var isMember = await db.Memberships.AsNoTracking().AnyAsync(
+            x => x.OrganizationId == organizationId && x.UserId == userId, ct);
+        if (isMember)
+            db.ActivateTenant(organizationId);
+        return isMember;
     }
 }

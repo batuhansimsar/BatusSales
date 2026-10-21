@@ -49,3 +49,12 @@ Validation status:
 3. Check current stable packages, security advisories, platform changes and integration requirements.
 4. Take the smallest valuable P0 milestone, develop it on a feature branch, add tests.
 5. Update this file with exact SHA, tested status, completed work and next blockers.
+
+## 2026-10-21 — Stacked P0 tenant contact DB guard (pending review)
+
+- Base: PR #12, `feat/mvp-foundation-tenant-crm` @ `18a0ccfcf983`. This is **not merged to main**.
+- Consolidation: adapted PR #8's context-scoped contact filter and save-time guard to PR #12's CRUD + audit design, without creating a third application scaffold.
+- Additional defense: Contact.OrganizationId is an EF concurrency token; detached updates must match the tenant stored by the database.
+- Coverage: SQLite relational tests for missing/denied membership, scoped reads, sync/async write denial and guessed-ID detached update.
+- Pending: GitHub Actions results, PostgreSQL E2E + RLS review, EF migrations, verified-email production flow, role authorization. A query using IgnoreQueryFilters or ExecuteUpdate/Delete can bypass EF query/save guards, so authorization at endpoints and DB RLS defense remain required.
+- Integration: stacked PR targets the PR #12 branch, **not main**; choose the canonical foundation before considering any merge.

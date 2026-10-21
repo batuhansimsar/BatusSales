@@ -8,6 +8,11 @@ namespace BatusSales.Api.Data;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>(options)
 {
+    // Set only after a server-side membership check; unset contexts cannot see contacts.
+    public Guid? ActiveTenantId { get; private set; }
+    internal void ActivateTenant(Guid organizationId) => ActiveTenantId = organizationId;
+    internal void ClearTenant() => ActiveTenantId = null;
+
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMembership> Memberships => Set<OrganizationMembership>();
     public DbSet<Contact> Contacts => Set<Contact>();
@@ -35,10 +40,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<Contact>(entity =>
         {
             entity.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc });
+            // EF includes the original organization ID in UPDATE/DELETE predicates.
+            // This prevents detached entities with guessed IDs from crossing tenants.
+            entity.Property(x => x.OrganizationId).IsConcurrencyToken();
             entity.Property(x => x.Name).IsRequired().HasMaxLength(120);
             entity.Property(x => x.Email).HasMaxLength(254);
             entity.Property(x => x.Phone).HasMaxLength(40);
-            entity.HasQueryFilter(x => !x.IsDeleted);
+            // Context-property parameterization; no authorized organization means zero rows.
+            entity.HasQueryFilter(x => !x.IsDeleted && x.OrganizationId == ActiveTenantId);
             entity.HasOne<Organization>().WithMany()
                 .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -50,5 +59,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             entity.HasOne<Organization>().WithMany()
                 .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         });
+    }
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ValidateContactMutations();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateContactMutations();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateContactMutations()
+    {
+        ChangeTracker.DetectChanges();
+        foreach (var entry in ChangeTracker.Entries<Contact>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            if (ActiveTenantId is null || entry.Entity.OrganizationId != ActiveTenantId.Value)
+                throw new UnauthorizedAccessException(
+                    "Contact writes require verified membership in the matching organization.");
+
+            if (entry.State == EntityState.Modified &&
+                entry.Property(x => x.OrganizationId).IsModified)
+                throw new UnauthorizedAccessException("Contacts cannot move between organizations.");
+        }
     }
 }
