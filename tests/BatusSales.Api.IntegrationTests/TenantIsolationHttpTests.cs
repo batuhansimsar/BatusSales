@@ -168,6 +168,79 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+    [Fact]
+    public async Task MemberDirectoryIsTenantScopedAndOwnerAdminOnlyOnPostgres()
+    {
+        using var anonymous = CreateClient();
+        using var owner = CreateClient();
+        using var admin = CreateClient();
+        using var agent = CreateClient();
+        using var outsider = CreateClient();
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await anonymous.GetAsync($"/api/organizations/{Guid.NewGuid()}/members")).StatusCode);
+
+        await AuthenticateAsync(owner);
+        var adminEmail = await AuthenticateAsync(admin);
+        var agentEmail = await AuthenticateAsync(agent);
+        await AuthenticateAsync(outsider);
+
+        var organizationId = await CreateOrganizationAsync(owner, "Member directory");
+        var otherOrganizationId = await CreateOrganizationAsync(outsider, "Other directory");
+
+        Guid adminId;
+        Guid agentId;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            adminId = await db.Users.Where(x => x.Email == adminEmail)
+                .Select(x => x.Id).SingleAsync();
+            agentId = await db.Users.Where(x => x.Email == agentEmail)
+                .Select(x => x.Id).SingleAsync();
+            db.Memberships.AddRange(
+                new BatusSales.Api.Domain.OrganizationMembership
+                {
+                    OrganizationId = organizationId, UserId = adminId,
+                    Role = BatusSales.Api.Domain.OrganizationRole.Admin
+                },
+                new BatusSales.Api.Domain.OrganizationMembership
+                {
+                    OrganizationId = organizationId, UserId = agentId,
+                    Role = BatusSales.Api.Domain.OrganizationRole.Agent
+                });
+            await db.SaveChangesAsync();
+        }
+
+        var path = $"/api/organizations/{organizationId}/members";
+        var ownerResponse = await owner.GetAsync(path);
+        Assert.Equal(HttpStatusCode.OK, ownerResponse.StatusCode);
+        var members = await ownerResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(3, members.GetArrayLength());
+        Assert.Contains(members.EnumerateArray(), member =>
+            member.GetProperty("userId").GetGuid() == adminId &&
+            member.GetProperty("role").GetInt32() == (int)BatusSales.Api.Domain.OrganizationRole.Admin);
+        Assert.Contains(members.EnumerateArray(), member =>
+            member.GetProperty("userId").GetGuid() == agentId &&
+            member.GetProperty("role").GetInt32() == (int)BatusSales.Api.Domain.OrganizationRole.Agent);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await agent.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await outsider.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"/api/organizations/{otherOrganizationId}/members")).StatusCode);
+
+        // An already-issued token may not retain access after removing the DB membership.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(x =>
+                x.OrganizationId == organizationId && x.UserId == adminId);
+            db.Memberships.Remove(membership);
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync(path)).StatusCode);
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -175,7 +248,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             AllowAutoRedirect = false
         });
 
-    private static async Task AuthenticateAsync(HttpClient client)
+    private static async Task<string> AuthenticateAsync(HttpClient client)
     {
         var email = $"tenant-{Guid.NewGuid():N}@example.test";
         const string password = "Strong-Integration-Password_2026!";
@@ -193,6 +266,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var json = await login.Content.ReadFromJsonAsync<JsonElement>();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Bearer", json.GetProperty("accessToken").GetString());
+        return email;
     }
 
     private static async Task<Guid> CreateOrganizationAsync(HttpClient client, string name)
