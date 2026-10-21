@@ -1,3 +1,4 @@
+using Xunit;
 using BatusSales.Api.Validation;
 
 namespace BatusSales.Api.Tests;
