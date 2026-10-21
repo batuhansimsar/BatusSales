@@ -106,7 +106,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .SingleAsync(x => x.Id == ownerContact);
         Assert.True(deleted.IsDeleted);
         Assert.Equal("Original", deleted.Name);
-        Assert.Equal(0, await db.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await db.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == ownerOrg && x.Action == "contact.updated"));
     }
 
@@ -161,9 +161,9 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
         Assert.Equal("Original", contact.Name);
         Assert.False(contact.IsDeleted);
-        Assert.Equal(1, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(1, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.created"));
-        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId &&
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }

@@ -131,3 +131,12 @@ Milestone: **P0 development foundation, NOT a paid-pilot-ready MVP**.
 3. If an existing PR or branch already handles it, improve or review that workstream; do not recreate its code, migration, test or commit under a different name.
 4. Research official patch/security guidance relevant to the next smallest P0 slice; keep new infrastructure limited to demonstrated need.
 5. Test against disposable PostgreSQL and CI; record exact new SHA and pass/fail, and do not claim production readiness without the release gates above.
+
+
+## Increment — audit event tenant query defense (2026-10-21, PR #24)
+
+- Applied the existing membership-verified DbContext tenant query scope to `AuditEvent` reads, failing closed with no authorized tenant.
+- Added no-membership / guessed-ID / tenant-switch / denied-membership audit isolation regression coverage.
+- Kept all 3 PostgreSQL HTTP test audit assertions meaningful with explicit privileged `IgnoreQueryFilters()`; the test must inspect persisted writes even without an active tenant scope.
+- Reused original commit `287d61e4a4a323e1e8726a71e35508380e9c30ab` via ancestry-preserving merge (no duplicate Identity/CRM code).
+- Remaining security gates: production identity and migrations, explicit privileged query policy, direct SQL/RLS review and immutable audit write protections.
