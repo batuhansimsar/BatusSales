@@ -171,43 +171,39 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
     [Fact]
     public async Task MemberDirectoryIsTenantScopedAndOwnerAdminOnlyOnPostgres()
     {
+        // One authenticated principal exercises live role changes; registration
+        // requests in unrelated tests must not exhaust the API's real auth limiter.
         using var anonymous = CreateClient();
         using var owner = CreateClient();
-        using var admin = CreateClient();
-        using var agent = CreateClient();
-        using var outsider = CreateClient();
 
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await anonymous.GetAsync($"/api/organizations/{Guid.NewGuid()}/members")).StatusCode);
 
-        await AuthenticateAsync(owner);
-        var adminEmail = await AuthenticateAsync(admin);
-        var agentEmail = await AuthenticateAsync(agent);
-        await AuthenticateAsync(outsider);
-
+        var email = await AuthenticateAsync(owner);
         var organizationId = await CreateOrganizationAsync(owner, "Member directory");
-        var otherOrganizationId = await CreateOrganizationAsync(outsider, "Other directory");
+        var foreignOrganizationId = Guid.NewGuid();
+        var memberId = Guid.NewGuid();
+        Guid ownerId;
 
-        Guid adminId;
-        Guid agentId;
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            adminId = await db.Users.Where(x => x.Email == adminEmail)
+            ownerId = await db.Users.Where(x => x.Email == email)
                 .Select(x => x.Id).SingleAsync();
-            agentId = await db.Users.Where(x => x.Email == agentEmail)
-                .Select(x => x.Id).SingleAsync();
-            db.Memberships.AddRange(
-                new BatusSales.Api.Domain.OrganizationMembership
-                {
-                    OrganizationId = organizationId, UserId = adminId,
-                    Role = BatusSales.Api.Domain.OrganizationRole.Admin
-                },
-                new BatusSales.Api.Domain.OrganizationMembership
-                {
-                    OrganizationId = organizationId, UserId = agentId,
-                    Role = BatusSales.Api.Domain.OrganizationRole.Agent
-                });
+            db.Users.Add(new BatusSales.Api.Domain.AppUser
+            {
+                Id = memberId, UserName = $"agent-{memberId:N}",
+                Email = $"agent-{memberId:N}@example.test"
+            });
+            db.Organizations.Add(new BatusSales.Api.Domain.Organization
+            {
+                Id = foreignOrganizationId, Name = "Foreign directory"
+            });
+            db.Memberships.Add(new BatusSales.Api.Domain.OrganizationMembership
+            {
+                OrganizationId = organizationId, UserId = memberId,
+                Role = BatusSales.Api.Domain.OrganizationRole.Agent
+            });
             await db.SaveChangesAsync();
         }
 
@@ -215,30 +211,43 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var ownerResponse = await owner.GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, ownerResponse.StatusCode);
         var members = await ownerResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(3, members.GetArrayLength());
+        Assert.Equal(2, members.GetArrayLength());
         Assert.Contains(members.EnumerateArray(), member =>
-            member.GetProperty("userId").GetGuid() == adminId &&
-            member.GetProperty("role").GetInt32() == (int)BatusSales.Api.Domain.OrganizationRole.Admin);
+            member.GetProperty("userId").GetGuid() == ownerId &&
+            member.GetProperty("role").GetInt32() == (int)BatusSales.Api.Domain.OrganizationRole.Owner);
         Assert.Contains(members.EnumerateArray(), member =>
-            member.GetProperty("userId").GetGuid() == agentId &&
+            member.GetProperty("userId").GetGuid() == memberId &&
             member.GetProperty("role").GetInt32() == (int)BatusSales.Api.Domain.OrganizationRole.Agent);
 
-        Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await agent.GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await outsider.GetAsync(path)).StatusCode);
+        // Existing bearer token cannot grant access to a different existing org.
         Assert.Equal(HttpStatusCode.NotFound,
-            (await owner.GetAsync($"/api/organizations/{otherOrganizationId}/members")).StatusCode);
+            (await owner.GetAsync($"/api/organizations/{foreignOrganizationId}/members")).StatusCode);
 
-        // An already-issued token may not retain access after removing the DB membership.
+        async Task ChangeRoleAsync(BatusSales.Api.Domain.OrganizationRole role)
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(x =>
+                x.OrganizationId == organizationId && x.UserId == ownerId);
+            membership.Role = role;
+            await db.SaveChangesAsync();
+        }
+
+        await ChangeRoleAsync(BatusSales.Api.Domain.OrganizationRole.Admin);
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync(path)).StatusCode);
+
+        await ChangeRoleAsync(BatusSales.Api.Domain.OrganizationRole.Agent);
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync(path)).StatusCode);
+
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var membership = await db.Memberships.SingleAsync(x =>
-                x.OrganizationId == organizationId && x.UserId == adminId);
+                x.OrganizationId == organizationId && x.UserId == ownerId);
             db.Memberships.Remove(membership);
             await db.SaveChangesAsync();
         }
-        Assert.Equal(HttpStatusCode.NotFound, (await admin.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync(path)).StatusCode);
     }
 
     private HttpClient CreateClient() =>
