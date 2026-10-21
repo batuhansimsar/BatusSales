@@ -233,15 +233,18 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
     [Fact]
     public async Task FaqCrudWithPostgresEnforcesTenantAndAudit()
     {
-        using var owner = CreateClient();
-        using var outsider = CreateClient();
+        // The app's IP-based auth limiter must stay enabled. A separate TestServer
+        // prevents another test's logins from consuming this test's auth quota.
+        using var faqFactory = new PostgreSqlApiFactory();
+        using var owner = CreateClient(faqFactory);
+        using var outsider = CreateClient(faqFactory);
         await AuthenticateAsync(owner);
         await AuthenticateAsync(outsider);
         var org = await CreateOrganizationAsync(owner, "FAQ owner");
         var outsiderOrg = await CreateOrganizationAsync(outsider, "FAQ outsider");
         var path = $"/api/organizations/{org}/knowledge/faqs";
 
-        using var anonymous = CreateClient();
+        using var anonymous = CreateClient(faqFactory);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await outsider.GetAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound,
@@ -275,7 +278,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync($"{path}/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync($"{path}/{id}")).StatusCode);
 
-        await using var scope = factory.Services.CreateAsyncScope();
+        await using var scope = faqFactory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var persisted = await db.KnowledgeEntries.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(x => x.Id == id);
@@ -286,8 +289,8 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
                 x.OrganizationId == org && x.EntityId == id && x.Action == action));
     }
 
-    private HttpClient CreateClient() =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions
+    private HttpClient CreateClient(PostgreSqlApiFactory? source = null) =>
+        (source ?? factory).CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
