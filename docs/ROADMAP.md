@@ -4,10 +4,10 @@ P0 means required for the first paid pilot; P1 and P2 follow validated customer 
 
 | Order | Deliverable | Status |
 | --- | --- | --- |
-| 0 | .NET API, identity, PostgreSQL, organizations, tenant-scoped CRM contacts | Initial branch |
+| 0 | .NET API, identity, PostgreSQL, organizations, tenant-scoped CRM contacts | Merged to main (#12), pre-production foundation |
 | 1 | Auth UI, onboarding, invitations and Owner/Admin/Agent authorization | Pending |
 | 2 | Website chat widget, inbox, assignment and human handoff | Pending |
-| 3 | AI knowledge base, scoped answers, safe tools, tests and model-cost budget | Pending |
+| 3 | AI knowledge base, scoped answers, safe tools, tests and model-cost budget | FAQ CRUD in proposed draft PR; agent/RAG/guardrails pending |
 | 4 | Staff/services/calendar and double-booking-safe appointments | Pending |
 | 5 | Events, simple workflow and reliable outbox/retry | Pending |
 | 6 | Deal pipeline, overview metrics, usage metering and subscriptions | Pending |

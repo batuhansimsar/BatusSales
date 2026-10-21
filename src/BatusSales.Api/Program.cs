@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using BatusSales.Api.Data;
 using BatusSales.Api.Domain;
 using BatusSales.Api.Features.Contacts;
+using BatusSales.Api.Features.Knowledge;
 using BatusSales.Api.Features.Organizations;
 using BatusSales.Api.Infrastructure;
 using Microsoft.AspNetCore.Identity;
@@ -83,6 +84,7 @@ app.MapGet("/health/ready", async (AppDbContext db, CancellationToken ct) =>
 app.MapGroup("/auth").RequireRateLimiting("auth").MapIdentityApi<AppUser>();
 app.MapOrganizationEndpoints();
 app.MapContactEndpoints();
+app.MapKnowledgeEndpoints();
 
 app.Run();
 
