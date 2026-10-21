@@ -2,6 +2,8 @@ using BatusSales.Api.Data;
 using BatusSales.Api.Domain;
 using BatusSales.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 
 namespace BatusSales.Api.Features.Organizations;
 
@@ -31,6 +33,9 @@ public static class OrganizationMemberEndpoints
             ).ToListAsync(ct);
 
             return Results.Ok(members);
-        }).RequireAuthorization();
+        }).RequireAuthorization(new AuthorizeAttribute
+        {
+            AuthenticationSchemes = IdentityConstants.BearerScheme
+        });
     }
 }
