@@ -58,7 +58,23 @@ public sealed class SalesDbContext(
         });
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    // All EF Core save entry points must enforce the same tenant boundary.
+    // The parameterless/single-argument shortcuts dispatch to these overloads.
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        ValidateContactMutations();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateContactMutations();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void ValidateContactMutations()
     {
         foreach (var entry in ChangeTracker.Entries<Contact>())
         {
@@ -82,6 +98,5 @@ public sealed class SalesDbContext(
             }
         }
 
-        return base.SaveChangesAsync(cancellationToken);
     }
 }

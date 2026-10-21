@@ -69,4 +69,51 @@ public sealed class TenantIsolationTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(
             () => db.SaveChangesAsync());
     }
+
+    [Fact]
+    public void Synchronous_save_rejects_cross_tenant_contact_writes()
+    {
+        var options = new DbContextOptionsBuilder<SalesDbContext>()
+            .UseSqlite("DataSource=:memory:").Options;
+        using var db = new SalesDbContext(options, new CurrentTenant { Id = Guid.NewGuid() });
+        db.Contacts.Add(new Contact
+        {
+            OrganizationId = Guid.NewGuid(),
+            Name = "Not owned"
+        });
+
+        Assert.Throws<UnauthorizedAccessException>(() => db.SaveChanges());
+        Assert.Throws<UnauthorizedAccessException>(() => db.SaveChanges(false));
+    }
+
+    [Fact]
+    public async Task Async_save_with_explicit_accept_flag_rejects_cross_tenant_contact_writes()
+    {
+        var options = new DbContextOptionsBuilder<SalesDbContext>()
+            .UseSqlite("DataSource=:memory:").Options;
+        await using var db = new SalesDbContext(options, new CurrentTenant { Id = Guid.NewGuid() });
+        db.Contacts.Add(new Contact
+        {
+            OrganizationId = Guid.NewGuid(),
+            Name = "Not owned"
+        });
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => db.SaveChangesAsync(false));
+    }
+
+    [Fact]
+    public async Task Async_save_without_authorized_tenant_fails_closed()
+    {
+        var options = new DbContextOptionsBuilder<SalesDbContext>()
+            .UseSqlite("DataSource=:memory:").Options;
+        await using var db = new SalesDbContext(options, new CurrentTenant());
+        db.Contacts.Add(new Contact
+        {
+            OrganizationId = Guid.NewGuid(),
+            Name = "No membership"
+        });
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => db.SaveChangesAsync());
+    }
+
 }

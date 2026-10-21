@@ -13,6 +13,7 @@ Current workstream: feat/foundation-auth-tenancy-crm-v1
 - Tenant membership endpoint guard (fail closed) for CRM.
 - Contact create/list/get with explicit tenant ID on writes and EF query filters.
 - Tenant-isolation test cases and CI workflow.
+- Contact write-guard coverage extended to synchronous saves and both async overloads, with regression tests (CI verification required).
 - Development-only database initialization; Docker PostgreSQL.
 
 ## Not yet shipped / do not claim complete
