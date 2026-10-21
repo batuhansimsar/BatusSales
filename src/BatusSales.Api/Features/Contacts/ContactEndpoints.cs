@@ -13,16 +13,35 @@ public static class ContactEndpoints
             .RequireAuthorization();
 
         group.MapGet("", async (
-            Guid organizationId, int? page, int? pageSize, HttpContext context,
+            Guid organizationId, int? page, int? pageSize, string? search, HttpContext context,
             AppDbContext db, CancellationToken ct) =>
         {
             if (!await TenantAccess.IsMemberAsync(db, context.User, organizationId, ct))
                 return Results.NotFound();
 
+            // Search only after membership resolution; keep the tenant predicate on
+            // the server and treat user-supplied LIKE metacharacters literally.
+            var term = search?.Trim();
+            if (term is { Length: > 100 })
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["search"] = ["Search must be at most 100 characters."]
+                });
+
             var currentPage = Math.Clamp(page ?? 1, 1, 100_000);
             var size = Math.Clamp(pageSize ?? 25, 1, 100);
-            var query = db.Contacts.AsNoTracking()
+            IQueryable<Contact> query = db.Contacts.AsNoTracking()
                 .Where(x => x.OrganizationId == organizationId);
+            if (!string.IsNullOrWhiteSpace(term))
+            {
+                var literal = term.Replace(@"\", @"\\").Replace("%", @"\%").Replace("_", @"\_");
+                var pattern = $"%{literal}%";
+                query = query.Where(x =>
+                    EF.Functions.ILike(x.Name, pattern, @"\") ||
+                    (x.Email != null && EF.Functions.ILike(x.Email, pattern, @"\")) ||
+                    (x.Phone != null && EF.Functions.ILike(x.Phone, pattern, @"\")));
+            }
+
             var count = await query.CountAsync(ct);
             var items = await query.OrderByDescending(x => x.CreatedAtUtc)
                 .ThenBy(x => x.Id)

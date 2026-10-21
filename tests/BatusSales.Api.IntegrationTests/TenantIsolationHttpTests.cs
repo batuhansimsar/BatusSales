@@ -168,6 +168,47 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+    [Fact]
+    public async Task ContactSearchIsCaseInsensitiveLiteralAndTenantScopedOnPostgres()
+    {
+        using var owner = CreateClient();
+        using var outsider = CreateClient();
+        await AuthenticateAsync(owner);
+        await AuthenticateAsync(outsider);
+
+        var org = await CreateOrganizationAsync(owner, "Search owner");
+        var otherOrg = await CreateOrganizationAsync(outsider, "Search outsider");
+        await CreateContactAsync(owner, org, "Deniz Alpine", "deniz@example.test", "+90 555 123 4567");
+        await CreateContactAsync(owner, org, "100% Loyal");
+        await CreateContactAsync(owner, org, "1000 Loyal");
+        await CreateContactAsync(owner, org, "A_B");
+        await CreateContactAsync(owner, org, "ACB");
+        await CreateContactAsync(outsider, otherOrg, "Deniz Foreign");
+
+        foreach (var search in new[] { "deniz", "DENIZ", "deniz@example.test", "555 123", "100%", "A_B" })
+        {
+            var result = await SearchAsync(owner, org, search);
+            Assert.Equal(1, result.GetProperty("total").GetInt32());
+            Assert.Single(result.GetProperty("items").EnumerateArray());
+        }
+
+        var all = await SearchAsync(owner, org, " ");
+        Assert.Equal(5, all.GetProperty("total").GetInt32());
+
+        var twoMatches = await SearchAsync(owner, org, "100");
+        Assert.Equal(2, twoMatches.GetProperty("total").GetInt32());
+
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await outsider.GetAsync($"/api/organizations/{org}/contacts?search=deniz")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await owner.GetAsync($"/api/organizations/{org}/contacts?search={new string('x', 101)}"))
+                .StatusCode);
+    }
+
+    private static Task<JsonElement> SearchAsync(HttpClient client, Guid org, string search) =>
+        client.GetFromJsonAsync<JsonElement>(
+            $"/api/organizations/{org}/contacts?search={Uri.EscapeDataString(search)}");
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -204,11 +245,13 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .GetProperty("id").GetGuid();
     }
 
-    private static async Task<Guid> CreateContactAsync(HttpClient client, Guid organizationId)
+    private static async Task<Guid> CreateContactAsync(
+        HttpClient client, Guid organizationId, string name = "Original",
+        string? email = "original@example.test", string? phone = null)
     {
         var response = await client.PostAsJsonAsync(
             $"/api/organizations/{organizationId}/contacts",
-            new { name = "Original", email = "original@example.test", phone = (string?)null });
+            new { name, email, phone });
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("id").GetGuid();
