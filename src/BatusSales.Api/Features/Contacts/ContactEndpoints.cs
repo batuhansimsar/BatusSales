@@ -104,8 +104,11 @@ public static class ContactEndpoints
             Guid organizationId, Guid contactId, HttpContext context,
             AppDbContext db, CancellationToken ct) =>
         {
-            if (!await TenantAccess.IsMemberAsync(db, context.User, organizationId, ct))
+            var role = await TenantAccess.GetRoleAsync(db, context.User, organizationId, ct);
+            if (role is null)
                 return Results.NotFound();
+            if (!TenantAccess.CanDeleteContacts(role))
+                return Results.Forbid();
 
             var contact = await db.Contacts.SingleOrDefaultAsync(
                 x => x.OrganizationId == organizationId && x.Id == contactId, ct);
