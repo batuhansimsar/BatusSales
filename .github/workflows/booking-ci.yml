@@ -1,0 +1,47 @@
+name: Booking P0 concurrency checks
+
+on:
+  pull_request:
+    paths:
+      - 'src/Modules/Booking/**'
+      - '.github/workflows/booking-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/Modules/Booking/**'
+      - '.github/workflows/booking-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  booking:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: booking_ci_password
+          POSTGRES_DB: booking_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d booking_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify Booking domain invariants
+        run: dotnet run --configuration Release --project src/Modules/Booking/BatusSales.Booking.Checks/BatusSales.Booking.Checks.csproj
+      - name: Verify PostgreSQL booking invariants
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/workspace:ro" -w /workspace \
+            -e PGPASSWORD=booking_ci_password \
+            postgres:17 psql -h 127.0.0.1 -U postgres -d booking_ci -X -v ON_ERROR_STOP=1 \
+              -f src/Modules/Booking/Sql/001_appointments.sql \
+              -f src/Modules/Booking/Sql/test_appointments.sql
