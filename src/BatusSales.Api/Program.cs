@@ -82,6 +82,7 @@ app.MapGet("/health/ready", async (AppDbContext db, CancellationToken ct) =>
 
 app.MapGroup("/auth").RequireRateLimiting("auth").MapIdentityApi<AppUser>();
 app.MapOrganizationEndpoints();
+app.MapOrganizationMemberEndpoints();
 app.MapContactEndpoints();
 
 app.Run();

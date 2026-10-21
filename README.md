@@ -37,6 +37,7 @@ The API defaults to http://localhost:5088 for the launch profile.
 - POST /auth/refresh — refresh the opaque Identity access token
 - POST /api/organizations — JSON body: name (requires authentication)
 - GET /api/organizations — list your memberships
+- GET /api/organizations/{organizationId}/members — list member IDs, email and roles (Owner/Admin only; no membership returns 404)
 - GET /api/organizations/{organizationId}/contacts — list contacts
 - POST /api/organizations/{organizationId}/contacts — JSON body: name, email, phone
 - GET /api/organizations/{organizationId}/contacts/{contactId} — get contact
