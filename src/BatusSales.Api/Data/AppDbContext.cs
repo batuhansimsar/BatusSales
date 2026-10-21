@@ -54,6 +54,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
         builder.Entity<AuditEvent>(entity =>
         {
+            // Internal audit reads fail closed until exact database membership
+            // activates the current tenant. IgnoreQueryFilters() is privileged.
+            entity.HasQueryFilter(x => x.OrganizationId == ActiveTenantId);
             entity.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc });
             entity.Property(x => x.Action).IsRequired().HasMaxLength(80);
             entity.HasOne<Organization>().WithMany()

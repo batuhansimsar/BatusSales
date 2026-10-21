@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using BatusSales.Api.Data;
+using BatusSales.Api.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -106,7 +107,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .SingleAsync(x => x.Id == ownerContact);
         Assert.True(deleted.IsDeleted);
         Assert.Equal("Original", deleted.Name);
-        Assert.Equal(0, await db.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await db.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == ownerOrg && x.Action == "contact.updated"));
     }
 
@@ -161,11 +162,72 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .SingleAsync(x => x.OrganizationId == organizationId && x.Id == contactId);
         Assert.Equal("Original", contact.Name);
         Assert.False(contact.IsDeleted);
-        Assert.Equal(1, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(1, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.created"));
-        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId &&
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
+    }
+
+    [Fact]
+    public async Task LiveRoleDowngradeAndPromotionUseCurrentMembershipWithExistingToken()
+    {
+        using var client = CreateClient();
+        await AuthenticateAsync(client);
+        var organizationId = await CreateOrganizationAsync(
+            client, "Role downgrade organization");
+        var contactId = await CreateContactAsync(client, organizationId);
+        var contactPath = $"/api/organizations/{organizationId}/contacts/{contactId}";
+
+        // The token was issued when this account owned the organization.
+        // Change only the authoritative PostgreSQL membership role.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(
+                x => x.OrganizationId == organizationId);
+            Assert.Equal(OrganizationRole.Owner, membership.Role);
+            membership.Role = OrganizationRole.Agent;
+            await db.SaveChangesAsync();
+        }
+
+        // Agent can still read, but must not perform owner-only deletion.
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.GetAsync(contactPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.DeleteAsync(contactPath)).StatusCode);
+
+        // Verify no soft-delete and no forged contact.deleted audit entry.
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var savedContact = await verifyDb.Contacts.IgnoreQueryFilters()
+            .AsNoTracking().SingleAsync(x => x.Id == contactId);
+        Assert.False(savedContact.IsDeleted);
+        Assert.Equal("Original", savedContact.Name);
+        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.deleted"));
+
+        // PromotionWithExistingToken: an Admin promotion is recognized without
+        // re-issuing the access token, and the authorized deletion is audited.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(
+                x => x.OrganizationId == organizationId);
+            membership.Role = OrganizationRole.Admin;
+            await db.SaveChangesAsync();
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await client.DeleteAsync(contactPath)).StatusCode);
+
+        await using var promotedScope = factory.Services.CreateAsyncScope();
+        var promotedDb = promotedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deleted = await promotedDb.Contacts.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(x => x.Id == contactId);
+        Assert.True(deleted.IsDeleted);
+        Assert.Equal(1, await promotedDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.deleted"));
     }
 
     [Fact]
@@ -173,8 +235,9 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
     {
         // One authenticated principal exercises live role changes; registration
         // requests in unrelated tests must not exhaust the API's real auth limiter.
-        using var anonymous = CreateClient();
-        using var owner = CreateClient();
+        using var isolatedFactory = new PostgreSqlApiFactory();
+        using var anonymous = CreateClient(isolatedFactory);
+        using var owner = CreateClient(isolatedFactory);
 
         Assert.Equal(HttpStatusCode.Unauthorized,
             (await anonymous.GetAsync($"/api/organizations/{Guid.NewGuid()}/members")).StatusCode);
@@ -185,7 +248,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var memberId = Guid.NewGuid();
         Guid ownerId;
 
-        await using (var scope = factory.Services.CreateAsyncScope())
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             ownerId = await db.Users.Where(x => x.Email == email)
@@ -225,7 +288,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
 
         async Task ChangeRoleAsync(BatusSales.Api.Domain.OrganizationRole role)
         {
-            await using var scope = factory.Services.CreateAsyncScope();
+            await using var scope = isolatedFactory.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var membership = await db.Memberships.SingleAsync(x =>
                 x.OrganizationId == organizationId && x.UserId == ownerId);
@@ -239,7 +302,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         await ChangeRoleAsync(BatusSales.Api.Domain.OrganizationRole.Agent);
         Assert.Equal(HttpStatusCode.Forbidden, (await owner.GetAsync(path)).StatusCode);
 
-        await using (var scope = factory.Services.CreateAsyncScope())
+        await using (var scope = isolatedFactory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var membership = await db.Memberships.SingleAsync(x =>
@@ -250,8 +313,8 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync(path)).StatusCode);
     }
 
-    private HttpClient CreateClient() =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions
+    private HttpClient CreateClient(PostgreSqlApiFactory? server = null) =>
+        (server ?? factory).CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false
