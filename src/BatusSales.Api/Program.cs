@@ -14,7 +14,13 @@ if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("ConnectionStrings:Default is required. See README.md.");
 
 builder.Services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
-builder.Services.AddAuthorization();
+// Restrict tenant/business APIs to bearer credentials until a CSRF-safe browser BFF exists.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("BatusSalesBearer", policy =>
+        policy.AddAuthenticationSchemes(IdentityConstants.BearerScheme)
+            .RequireAuthenticatedUser());
+});
 builder.Services.AddIdentityApiEndpoints<AppUser>(options =>
 {
     options.User.RequireUniqueEmail = true;
@@ -70,6 +76,29 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 
 app.UseHttpsRedirection();
+
+// MapIdentityApi supports query-controlled cookie sign-in. Disable that mode
+// until an explicit browser-session and antiforgery design has been reviewed.
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsPost(context.Request.Method) &&
+        string.Equals(context.Request.Path.Value, "/auth/login", StringComparison.OrdinalIgnoreCase) &&
+        context.Request.Query.Any(parameter =>
+            (string.Equals(parameter.Key, "useCookies", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(parameter.Key, "useSessionCookies", StringComparison.OrdinalIgnoreCase)) &&
+            !string.Equals(parameter.Value.ToString(), "false", StringComparison.OrdinalIgnoreCase)))
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "Cookie sign-in is unavailable until CSRF protection is implemented."
+        });
+        return;
+    }
+
+    await next(context);
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();

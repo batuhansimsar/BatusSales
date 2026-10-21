@@ -12,7 +12,7 @@ public static class OrganizationEndpoints
 
     public static void MapOrganizationEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/organizations").RequireAuthorization();
+        var group = app.MapGroup("/api/organizations").RequireAuthorization("BatusSalesBearer");
 
         group.MapPost("", async (
             CreateOrganizationRequest input, HttpContext context, AppDbContext db, CancellationToken ct) =>

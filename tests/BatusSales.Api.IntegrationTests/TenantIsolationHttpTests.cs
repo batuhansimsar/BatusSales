@@ -168,6 +168,47 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
     }
 
+    [Fact]
+    public async Task CookieLoginIsBlockedUntilCsrfProtectionExists()
+    {
+        using var client = CreateClient();
+        var email = $"cookie-guard-{Guid.NewGuid():N}@example.test";
+        const string password = "Strong-Integration-Password_2026!";
+
+        var registered = await client.PostAsJsonAsync(
+            "/auth/register", new { email, password });
+        Assert.True(registered.IsSuccessStatusCode);
+
+        // Reject both built-in cookie sign-in switches.
+        foreach (var query in new[] { "useCookies=true", "useSessionCookies=true",
+                     "useCookies=true&useSessionCookies=false" })
+        {
+            var rejected = await client.PostAsJsonAsync(
+                $"/auth/login?{query}", new { email, password });
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            Assert.False(rejected.Headers.Contains("Set-Cookie"));
+        }
+
+        // The existing bearer-token login and tenant API remain usable.
+        var login = await client.PostAsJsonAsync(
+            "/auth/login?useCookies=false", new { email, password });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        var token = await login.Content.ReadFromJsonAsync<JsonElement>();
+        var accessToken = token.GetProperty("accessToken").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(accessToken));
+
+        using var noBearer = CreateClient();
+        noBearer.DefaultRequestHeaders.TryAddWithoutValidation(
+            "Cookie", ".AspNetCore.Identity.Application=not-a-valid-ticket");
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await noBearer.GetAsync("/api/organizations")).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", accessToken);
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.GetAsync("/api/organizations")).StatusCode);
+    }
+
     private HttpClient CreateClient() =>
         factory.CreateClient(new WebApplicationFactoryClientOptions
         {

@@ -116,3 +116,19 @@ does not falsely block legitimate deletes.
 Validation for this combined tree requires its own CI check. Remaining blockers:
 PostgreSQL tenant/RBAC HTTP negative tests, reviewed EF migrations, RLS/unsafe bulk SQL
 review and production email/CSRF/secrets setup.
+
+
+## P0 browser-auth security increment — pending verification (2026-10-21)
+
+- The CRM and Organization HTTP routes require the Identity bearer authentication scheme,
+  not its cookie-or-bearer policy scheme.
+- The Identity login endpoint rejects `useCookies=true` and `useSessionCookies=true`
+  until a browser BFF and reviewed CSRF protection exist. Explicit
+  `useCookies=false` remains supported for the existing API clients.
+- A PostgreSQL-backed HTTP regression test asserts cookie sign-in is rejected and
+  valid bearer authentication still grants access to the tenant API.
+- Keep this change on its own review branch; do **not** claim deployment or
+  production readiness based on source edits alone.
+- Browser BFF, verified production email, versioned EF migrations,
+  security testing and tenant-safe session management remain P0 blockers.
+- Reference: https://learn.microsoft.com/en-us/aspnet/core/security/anti-request-forgery?view=aspnetcore-10.0
