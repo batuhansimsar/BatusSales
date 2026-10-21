@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using BatusSales.Api.Data;
+using BatusSales.Api.Domain;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -166,6 +167,45 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
             x.OrganizationId == organizationId &&
             (x.Action == "contact.updated" || x.Action == "contact.deleted")));
+    }
+
+    [Fact]
+    public async Task DowngradedOwnerCannotDeleteWithStillValidBearerToken()
+    {
+        using var client = CreateClient();
+        await AuthenticateAsync(client);
+        var organizationId = await CreateOrganizationAsync(
+            client, "Role downgrade organization");
+        var contactId = await CreateContactAsync(client, organizationId);
+        var contactPath = $"/api/organizations/{organizationId}/contacts/{contactId}";
+
+        // The token was issued when this account owned the organization.
+        // Change only the authoritative PostgreSQL membership role.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var membership = await db.Memberships.SingleAsync(
+                x => x.OrganizationId == organizationId);
+            Assert.Equal(OrganizationRole.Owner, membership.Role);
+            membership.Role = OrganizationRole.Agent;
+            await db.SaveChangesAsync();
+        }
+
+        // Agent can still read, but must not perform owner-only deletion.
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.GetAsync(contactPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.DeleteAsync(contactPath)).StatusCode);
+
+        // Verify no soft-delete and no forged contact.deleted audit entry.
+        await using var verifyScope = factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var savedContact = await verifyDb.Contacts.IgnoreQueryFilters()
+            .AsNoTracking().SingleAsync(x => x.Id == contactId);
+        Assert.False(savedContact.IsDeleted);
+        Assert.Equal("Original", savedContact.Name);
+        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+            x.OrganizationId == organizationId && x.Action == "contact.deleted"));
     }
 
     private HttpClient CreateClient() =>
