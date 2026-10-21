@@ -38,3 +38,39 @@ jobs:
         run: test -n "$BATUSSALES_TEST_POSTGRES"
       - name: Run unit and PostgreSQL integration tests
         run: dotnet test tests/BatusSales.Api.Tests/BatusSales.Api.Tests.csproj --configuration Release
+      - name: Smoke-test API boot and Identity register/login against PostgreSQL
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          ASPNETCORE_URLS: http://127.0.0.1:18080
+          ConnectionStrings__Postgres: "Host=127.0.0.1;Port=5432;Database=batussales_test;Username=batussales_test;Password=ci_test_password_only"
+          BATUSSALES_DEV_CREATE_DB: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet run --no-build --configuration Release --project src/BatusSales.Api/BatusSales.Api.csproj > "$RUNNER_TEMP/batussales-api.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          ready=false
+          for i in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:18080/health > /dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/batussales-api.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            cat "$RUNNER_TEMP/batussales-api.log"
+            exit 1
+          fi
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci-smoke@example.test","password":"T3st!PassW0rd888"}' \
+            http://127.0.0.1:18080/auth/register > /dev/null
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci-smoke@example.test","password":"T3st!PassW0rd888"}' \
+            http://127.0.0.1:18080/auth/login > /dev/null

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Threading.RateLimiting;
 using BatusSales.Api.Data;
 using BatusSales.Api.Domain;
+using BatusSales.Api.Infrastructure;
 using BatusSales.Api.Modules.Crm;
 using BatusSales.Api.Modules.Tenancy;
 using Microsoft.AspNetCore.Identity;
@@ -23,6 +24,18 @@ builder.Services.AddIdentityApiEndpoints<ApplicationUser>(options =>
         // Production release gate: set RequireConfirmedEmail = true and configure an email sender.
     })
     .AddEntityFrameworkStores<SalesDbContext>();
+
+// MapIdentityApi resolves IEmailSender<ApplicationUser> during endpoint registration.
+// Never expose a no-op email sender outside local development.
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<IEmailSender<ApplicationUser>, DevelopmentEmailSender>();
+}
+else
+{
+    throw new InvalidOperationException(
+        "Production Identity email delivery and verified-account sign-in are not configured.");
+}
 builder.Services.AddAuthorization();
 builder.Services.AddHealthChecks();
 

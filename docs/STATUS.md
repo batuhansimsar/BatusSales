@@ -46,3 +46,16 @@ backend and porting only unique changes. Closed PR #3 was not merged.
 The code was authored without a local .NET SDK. CI is the source of build and test
 verification. Passing database model tests does not prove the HTTP membership guard,
 RLS, production security, or tenant isolation of future modules.
+
+## Proposed follow-up: Identity runtime hardening (stacked on PR #8)
+- Discovered that MapIdentityApi<ApplicationUser> requires IEmailSender<ApplicationUser>
+  at endpoint registration; the original foundation did not register the service.
+- Added an explicitly Development-only, no-op email adapter that never prints
+  confirmation links or password-reset tokens. Email verification and recovery
+  remain nonfunctional in development until a real sender is implemented.
+- Production/non-Development startup fails closed instead of silently allowing
+  unverified accounts or pretending email messages were delivered.
+- CI must boot the API with ephemeral PostgreSQL, exercise /auth/register and
+  /auth/login, and confirm success. Compile-only CI was insufficient.
+- This is a distinct follow-up to PostgreSQL tenant isolation tests (commit
+  9526872), not another CRM foundation. Neither PR is merged into main.
