@@ -12,7 +12,7 @@ public sealed class BatuSalesDbContext(
     DbContextOptions<BatuSalesDbContext> options,
     TenantScope tenantScope) : DbContext(options)
 {
-    public Guid? ActiveOrganizationId => tenantScope.OrganizationId;
+    public Guid ActiveOrganizationId => tenantScope.OrganizationId ?? Guid.Empty;
 
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMember> Members => Set<OrganizationMember>();
@@ -58,8 +58,7 @@ public sealed class BatuSalesDbContext(
                 .HasDatabaseName("idx_contacts_org_created").IsDescending(false, true);
 
             // EF parameterizes the CURRENT request's verified organization ID.
-            e.HasQueryFilter(x => ActiveOrganizationId.HasValue
-                && x.OrganizationId == ActiveOrganizationId.Value);
+            e.HasQueryFilter(x => x.OrganizationId == ActiveOrganizationId);
         });
     }
 
