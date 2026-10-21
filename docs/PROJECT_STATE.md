@@ -1,3 +1,15 @@
+## Current main and schema-aware readiness review (2026-10-21)
+
+- At this slice's branch point main was `df369d5c9602e0fcd2ed0379241bb971caafc139`: the original #12 Identity/PostgreSQL tenant-safe CRM and membership-revocation work is already merged. The older pre-merge descriptions below are historical.
+- Distinct P0 safety issue: `/health/ready` previously returned 200 on any reachable PostgreSQL database, including one missing Identity/CRM tables.
+- This proposed PR makes readiness check connection **and** existence of the five baseline schema areas (users, organizations, memberships, contacts, audit events) with bounded existence queries. Database provider errors become HTTP 503, without exposing SQL detail; `/health/live` remains independent.
+- SQLite tests cover reachable-but-empty schema, intact schema and a dropped Contacts table. **GitHub Actions CI must pass before merge; no local .NET SDK was available.**
+- This is not an EF migration implementation and does not prove all future module tables are current. P0 release still requires versioned migrations, schema drift checks, production email, browser BFF/CSRF, backups and restore drills. Readiness probes should run at a sensible interval.
+
+References: https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks?view=aspnetcore-10.0 and https://learn.microsoft.com/en-us/ef/core/managing-schemas/migrations/applying
+
+---
+
 ## CURRENT MAIN (verified snapshot) — 2026-10-21
 
 > **Read this section before the historical log below.** Earlier text saying
