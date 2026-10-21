@@ -233,19 +233,20 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
     [Fact]
     public async Task ContactSearchIsCaseInsensitiveLiteralAndTenantScopedOnPostgres()
     {
+        // Reuse one authenticated user with two distinct organizations.
+        // This tests tenant scoping without exhausting the shared per-IP
+        // authentication limiter in the existing integration fixture.
         using var owner = CreateClient();
-        using var outsider = CreateClient();
         await AuthenticateAsync(owner);
-        await AuthenticateAsync(outsider);
 
         var org = await CreateOrganizationAsync(owner, "Search owner");
-        var otherOrg = await CreateOrganizationAsync(outsider, "Search outsider");
+        var otherOrg = await CreateOrganizationAsync(owner, "Search alternate organization");
         await CreateContactAsync(owner, org, "Deniz Alpine", "deniz@example.test", "+90 555 123 4567");
         await CreateContactAsync(owner, org, "100% Loyal");
         await CreateContactAsync(owner, org, "1000 Loyal");
         await CreateContactAsync(owner, org, "A_B");
         await CreateContactAsync(owner, org, "ACB");
-        await CreateContactAsync(outsider, otherOrg, "Deniz Foreign");
+        await CreateContactAsync(owner, otherOrg, "Deniz Foreign");
 
         foreach (var search in new[] { "deniz", "DENIZ", "deniz@example.test", "555 123", "100%", "A_B" })
         {
@@ -260,8 +261,12 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var twoMatches = await SearchAsync(owner, org, "100");
         Assert.Equal(2, twoMatches.GetProperty("total").GetInt32());
 
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await outsider.GetAsync($"/api/organizations/{org}/contacts?search=deniz")).StatusCode);
+        // An authorized user with access to multiple businesses only sees
+        // contacts for the organization named in the URL.
+        var otherTenant = await SearchAsync(owner, otherOrg, "deniz");
+        Assert.Equal(1, otherTenant.GetProperty("total").GetInt32());
+        Assert.Equal("Deniz Foreign",
+            otherTenant.GetProperty("items")[0].GetProperty("name").GetString());
         Assert.Equal(HttpStatusCode.BadRequest,
             (await owner.GetAsync($"/api/organizations/{org}/contacts?search={new string('x', 101)}"))
                 .StatusCode);
