@@ -16,6 +16,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationMembership> Memberships => Set<OrganizationMembership>();
     public DbSet<Contact> Contacts => Set<Contact>();
+    public DbSet<KnowledgeEntry> KnowledgeEntries => Set<KnowledgeEntry>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -52,6 +53,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
                 .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<KnowledgeEntry>(entity =>
+        {
+            entity.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc });
+            entity.Property(x => x.OrganizationId).IsConcurrencyToken();
+            entity.Property(x => x.Question).IsRequired().HasMaxLength(300);
+            entity.Property(x => x.Answer).IsRequired().HasMaxLength(4000);
+            entity.HasQueryFilter(x => !x.IsDeleted && x.OrganizationId == ActiveTenantId);
+            entity.HasOne<Organization>().WithMany()
+                .HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<AuditEvent>(entity =>
         {
             // Internal audit reads fail closed until exact database membership
@@ -65,7 +77,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
     }
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        ValidateContactMutations();
+        ValidateTenantOwnedMutations();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -73,11 +85,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
-        ValidateContactMutations();
+        ValidateTenantOwnedMutations();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
-    private void ValidateContactMutations()
+    private void ValidateTenantOwnedMutations()
     {
         ChangeTracker.DetectChanges();
         foreach (var entry in ChangeTracker.Entries<Contact>())
@@ -92,6 +104,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             if (entry.State == EntityState.Modified &&
                 entry.Property(x => x.OrganizationId).IsModified)
                 throw new UnauthorizedAccessException("Contacts cannot move between organizations.");
+        }
+        foreach (var entry in ChangeTracker.Entries<KnowledgeEntry>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+            if (ActiveTenantId is null || entry.Entity.OrganizationId != ActiveTenantId.Value)
+                throw new UnauthorizedAccessException(
+                    "FAQ writes require verified membership in the matching organization.");
+            if (entry.State == EntityState.Modified &&
+                entry.Property(x => x.OrganizationId).IsModified)
+                throw new UnauthorizedAccessException("FAQ entries cannot move between organizations.");
         }
     }
 }

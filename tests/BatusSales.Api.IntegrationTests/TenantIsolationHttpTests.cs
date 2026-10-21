@@ -204,7 +204,7 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
             .AsNoTracking().SingleAsync(x => x.Id == contactId);
         Assert.False(savedContact.IsDeleted);
         Assert.Equal("Original", savedContact.Name);
-        Assert.Equal(0, await verifyDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(0, await verifyDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.deleted"));
 
         // PromotionWithExistingToken: an Admin promotion is recognized without
@@ -226,12 +226,71 @@ public sealed class TenantIsolationHttpTests(PostgreSqlApiFactory factory)
         var deleted = await promotedDb.Contacts.IgnoreQueryFilters().AsNoTracking()
             .SingleAsync(x => x.Id == contactId);
         Assert.True(deleted.IsDeleted);
-        Assert.Equal(1, await promotedDb.AuditEvents.CountAsync(x =>
+        Assert.Equal(1, await promotedDb.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
             x.OrganizationId == organizationId && x.Action == "contact.deleted"));
     }
 
-    private HttpClient CreateClient() =>
-        factory.CreateClient(new WebApplicationFactoryClientOptions
+    [Fact]
+    public async Task FaqCrudWithPostgresEnforcesTenantAndAudit()
+    {
+        // The app's IP-based auth limiter must stay enabled. A separate TestServer
+        // prevents another test's logins from consuming this test's auth quota.
+        using var faqFactory = new PostgreSqlApiFactory();
+        using var owner = CreateClient(faqFactory);
+        using var outsider = CreateClient(faqFactory);
+        await AuthenticateAsync(owner);
+        await AuthenticateAsync(outsider);
+        var org = await CreateOrganizationAsync(owner, "FAQ owner");
+        var outsiderOrg = await CreateOrganizationAsync(outsider, "FAQ outsider");
+        var path = $"/api/organizations/{org}/knowledge/faqs";
+
+        using var anonymous = CreateClient(faqFactory);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await outsider.GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await outsider.PostAsJsonAsync(path, new { question = "Q", answer = "A" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await owner.PostAsJsonAsync(path, new { question = " ", answer = "A" })).StatusCode);
+
+        var created = await owner.PostAsJsonAsync(path,
+            new { question = " Hours? ", answer = " Weekdays from 9 to 5 " });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var json = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var id = json.GetProperty("id").GetGuid();
+        Assert.Equal("Hours?", json.GetProperty("question").GetString());
+
+        var list = await owner.GetFromJsonAsync<JsonElement>(path);
+        Assert.Contains(list.GetProperty("items").EnumerateArray(),
+            x => x.GetProperty("id").GetGuid() == id);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await outsider.GetAsync($"{path}/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"/api/organizations/{outsiderOrg}/knowledge/faqs/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await outsider.PutAsJsonAsync($"{path}/{id}",
+                new { question = "Changed?", answer = "Hacked" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await outsider.DeleteAsync($"{path}/{id}")).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK,
+            (await owner.PutAsJsonAsync($"{path}/{id}",
+                new { question = "Opening hours?", answer = "Monday to Friday 9-5" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await owner.DeleteAsync($"{path}/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await owner.GetAsync($"{path}/{id}")).StatusCode);
+
+        await using var scope = faqFactory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var persisted = await db.KnowledgeEntries.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(x => x.Id == id);
+        Assert.True(persisted.IsDeleted);
+        Assert.Equal("Monday to Friday 9-5", persisted.Answer);
+        foreach (var action in new[] { "knowledge.created", "knowledge.updated", "knowledge.deleted" })
+            Assert.Equal(1, await db.AuditEvents.IgnoreQueryFilters().CountAsync(x =>
+                x.OrganizationId == org && x.EntityId == id && x.Action == action));
+    }
+
+    private HttpClient CreateClient(PostgreSqlApiFactory? source = null) =>
+        (source ?? factory).CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri("https://localhost"),
             AllowAutoRedirect = false

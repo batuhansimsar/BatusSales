@@ -1,3 +1,12 @@
+## Draft workstream: tenant-scoped customer FAQ — PR #33 (unmerged)
+
+- Distinct P0 knowledge-base data slice: server-verified membership for reads, database Owner/Admin role for writes, customer-facing FAQ CRUD with tenant write/read guards, soft-delete and audit.
+- SQLite and real PostgreSQL HTTP regression coverage proposed in `feat/p0-tenant-faq-knowledge-20261021`. This does not implement AI agents/RAG or migrate a persistent database.
+- Requires a fresh **disposable development** database under current `EnsureCreated`; production EF migrations and other release gates remain pending.
+- https://github.com/batuhansimsar/BatusSales/pull/33
+
+---
+
 ## CURRENT MAIN (verified snapshot) — 2026-10-21
 
 > **Read this section before the historical log below.** Earlier text saying
